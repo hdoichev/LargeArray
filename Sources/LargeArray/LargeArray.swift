@@ -12,6 +12,8 @@ enum LAErrors: Error {
     case NilBaseAddress
     case ErrorReadingData
     case InvalidAddressInIndexPage
+    case InvalidFileVersion
+    case CorruptedIndex
 }
 
 typealias Address = UInt64
@@ -21,8 +23,21 @@ protocol StorageAccessor {
     func write<T: DataProtocol>(_ data: T, at address: Address) throws
     func write<T: DataProtocol>(data: T) throws
     func read(from address: Address, upToCount: Address) throws -> Data?
-    func read(upToCount: Address) throws -> Data?
+    func read(bytesCount: Address) throws -> Data?
     func seek(to: Address) throws
+}
+
+///
+public let _LA_VERSION: Int = 1
+struct Header: Codable {
+    let _version: Int
+    var _count: UInt64 /// Total number of lelements in the Array
+}
+///
+struct Node: Codable {
+    var address: Address = 0
+    var used: Address = 0
+    var reserved: Address = 0
 }
 
 ///
@@ -54,7 +69,6 @@ public struct LargeArray /*: MutableCollection, RandomAccessCollection */{
     
     var _header: Header
     let _maxElementsPerPage: Index
-    var _rootPage: IndexPage
     var _currentPage: IndexPage
     var _currentPage_startIndex: Index
     ///
@@ -62,27 +76,7 @@ public struct LargeArray /*: MutableCollection, RandomAccessCollection */{
 //    var _currentPageNode: Node
     @usableFromInline
     var _storage: [Any]
-    
-//    init(maxPerPage: Index = 1024)
-    
-//    @inlinable public var startIndex: Index {
-//        return _storage.startIndex
-//    }
-//    @inlinable public var endIndex: Index {
-//        return _storage.endIndex
-//    }
-//    @inlinable public func index(after i: Index) -> Index {
-//        return i + 1
-//    }
-//
-//    @inlinable public subscript(position: Index) -> Any {
-//        get {
-//            return _storage[position]
-//        }
-//        set {
-//            _storage[position] = newValue
-//        }
-//    }
+    ///
     mutating func appendNode(_ data:Data) throws {
         if _currentPage._nodes.count >= _maxElementsPerPage {
             try createNewCurrentPage()
@@ -92,98 +86,100 @@ public struct LargeArray /*: MutableCollection, RandomAccessCollection */{
         try _fileHandle.write(contentsOf: data)
         
         // update the IndexPage and store that too??? Or store the IndexPage only after a number of changes have occurred.
-        _currentPage._nodes.append(Node(address: 0, used: Address(data.count), reserved: Address(data.count)))
+        _currentPage._nodes.append(node)
         try _currentPage.store(using: _fileHandle) // store All
     }
+    ///
     mutating func removeNode(at position: Index) {
         
     }
+    ///
     mutating func createNewCurrentPage() throws {
-        let address: Address = 0 // TODO: Get proper page address
-        var newPage = IndexPage(address: address, maxNodes: _maxElementsPerPage)
+        var newPage = IndexPage(address: _fileHandle.seekToEndOfFile(), maxNodes: _maxElementsPerPage)
         newPage._info._prev = _currentPage._info._address
         // First: Store the new page, thus when the current_page.next is updated it will point to a properly stored data.
         try newPage.store(using: _fileHandle)
         // Second: Store the updated NexPageAddress of the current page.
-        _currentPage._info._next = address
+        _currentPage._info._next = newPage._info._address
         try _currentPage.store(using: _fileHandle, what: .Info)
         // Last: Set the new page as the current page and update related properties.
         _currentPage_startIndex = _currentPage_startIndex + Index(_currentPage._nodes.count)
+//        print("CurrentPage: \(_currentPage)")
+//        print("NewPage: \(newPage)")
         _currentPage = newPage
     }
-}
-
-///
-struct Header: Codable {
-    let _version: Int
-    var _count: UInt64 /// Total number of lelements in the Array
-}
-///
-struct Node: Codable {
-    var address: Address
-    var used: Address
-    var reserved: Address
-    init () {
-        address = 0
-        used = 0
-        reserved = 0
-    }
-    init(address: Address, used: Address, reserved: Address) {
-        self.address = address
-        self.used = used
-        self.reserved = reserved
+    ///
+    func isItemIndexInCurrentPage(index: Index) -> Bool {
+        return (_currentPage_startIndex..<(_currentPage_startIndex+_currentPage._nodes.count)).contains(index)
     }
     ///
-    func store(into buffer: UnsafeMutableRawBufferPointer) throws {
-        let out_buffer = buffer.bindMemory(to: Node.self)
-        guard out_buffer.count == 1 else { throw LAErrors.InvalidWriteBufferSize }
-        out_buffer[0] = self
-//        out_buffer[0] = address
-//        out_buffer[1] = used
-//        out_buffer[2] = reserved
+    mutating func loadPageFor(index: Index) throws {
+        guard isItemIndexInCurrentPage(index: index) == false else { return }
+        let traverseUp = (index < _currentPage_startIndex)
+        var page = IndexPage(address: 0, maxNodes: _maxElementsPerPage)
+        while isItemIndexInCurrentPage(index: index) == false {
+            guard traverseUp == (index < _currentPage_startIndex) else { throw LAErrors.CorruptedIndex }
+            let addressToLoad = traverseUp ? _currentPage._info._prev : _currentPage._info._next
+            guard addressToLoad != 0 else { throw LAErrors.CorruptedIndex }
+            try page.load(using: _fileHandle, from: addressToLoad, what: .Info)
+            traverseUp ? (_currentPage_startIndex -= page._info._availableNodes) :
+                         (_currentPage_startIndex += page._info._availableNodes)
+        }
+        _currentPage = page
+        try _currentPage.load(using: _fileHandle, from: page._info._address, what: .Nodes)
     }
-    mutating func load(from buffer:  UnsafeRawBufferPointer) throws {
-        let in_buffer = buffer.bindMemory(to: Node.self)
-        guard in_buffer.count == 1 else { throw LAErrors.InvalidReadBufferSize }
-        self = in_buffer[0]
-//        address = in_buffer[0]
-//        used = in_buffer[1]
-//        reserved = in_buffer[2]
-    }
-}
-///
-@available(macOS 10.15.4, *)
-struct IndexPage: Codable {
-    enum Properties {
-        case All, Info, Nodes
-    }
-    struct Info: Codable {
-        let _address: Address
-        var _availableNodes: Address
-        var _maxNodes: Address
-        var _next: Address
-        var _prev: Address
-    }
-    var _info: Info
-    var _nodes: ContiguousArray<Node>
-    init(address: Address, maxNodes: LargeArray.Index) {
-        _info = Info(_address: address, _availableNodes: 0, _maxNodes: Address(maxNodes), _next: 0, _prev: 0)
-        _nodes = ContiguousArray<Node>()
+    ///
+    mutating func getNodeFor(index: Index) throws -> Node {
+        try loadPageFor(index: index)
+        return _currentPage._nodes[index - _currentPage_startIndex]
     }
 }
 
 
 @available(macOS 10.15.4, *)
 extension LargeArray: MutableCollection, RandomAccessCollection {
-    init(maxPerPage: Index = 1024) {
-        _header = Header(_version: 1, _count: 0)
+    init?(path: String, maxPerPage: Index = 1024) {
+        if FileManager.default.fileExists(atPath: path) == false {
+            FileManager.default.createFile(atPath: path, contents: nil)
+        }
+        if let fh = FileHandle(forUpdatingAtPath: path) {
+            _fileHandle = fh
+        } else {
+            return nil
+        }
+        //
+        _header = Header(_version: _LA_VERSION, _count: 0)
         _maxElementsPerPage = maxPerPage
-        let address: Address = 0 // TODO: Get proper address for the root.
-        _rootPage = IndexPage(address: address, maxNodes: _maxElementsPerPage)
-        _currentPage = _rootPage
+        let rootPageaddress: Address = Address(MemoryLayout<Header>.size)
+        _currentPage = IndexPage(address: rootPageaddress, maxNodes: _maxElementsPerPage)
         _currentPage_startIndex = 0
         _storage = [Any]()
-        _fileHandle = FileHandle()
+
+        let fileSize = _fileHandle.seekToEndOfFile()
+        if fileSize > MemoryLayout<Header>.size {
+            do {
+                // try to initialize from the file
+                try _fileHandle.seek(toOffset: 0)
+                // Header
+                let headerData = _fileHandle.readData(ofLength: MemoryLayout<Header>.size)
+                try _load(into: &_header, from: headerData)
+                guard _header._version <= _LA_VERSION else { throw LAErrors.InvalidFileVersion }
+                try _currentPage.load(using: _fileHandle, from: rootPageaddress)
+            } catch {
+                // Log Error
+                return nil
+            }
+        } else {
+            // store initial state to file
+            do {
+                try _fileHandle.seek(toOffset: 0)
+                try _fileHandle.write(contentsOf: _store(from: _header))
+                try _currentPage.store(using: _fileHandle)
+            } catch {
+                // Log Error
+                return nil
+            }
+        }
     }
     
     @inlinable public var startIndex: Index {
@@ -234,6 +230,12 @@ extension Node: Equatable {
     }
 }
 
+extension Node: CustomStringConvertible {
+    var description: String {
+        "Node(address: \(address), used: \(used), reserved: \(reserved))"
+    }
+}
+
 @available(macOS 10.15.4, *)
 extension FileHandle: StorageAccessor {
     func write<T: DataProtocol>(_ data: T, at address: Address) throws {
@@ -247,80 +249,11 @@ extension FileHandle: StorageAccessor {
         try self.seek(toOffset: address)
         return try self.read(upToCount: Int(upToCount))
     }
-    func read(upToCount: Address) throws -> Data? {
-        return try self.read(upToCount: Int(upToCount))
+    func read(bytesCount: Address) throws -> Data? {
+        return try self.read(upToCount: Int(bytesCount))
     }
     func seek(to address: Address) throws {
         try self.seek(toOffset: address)
     }
 }
 
-@available(macOS 10.15.4, *)
-extension IndexPage {
-    /// "at" always points to the location where the entire page can be stored.
-    mutating func store(using storageAccessor: StorageAccessor, what: Properties = .All) throws {
-        _info._availableNodes = Address(_nodes.count) // preserve the count of the actual nodes, so we can properly load the nodes data
-        var data = Data(count: MemoryLayout<Info>.size)
-        data.withUnsafeMutableBytes { buffer in
-            let out_buffer = buffer.bindMemory(to: Info.self)
-//            guard out_buffer.count == 3 else { throw LAErrors.InvalidWriteBufferSize }
-            out_buffer[0] = _info
-        }
-        // Store the nodes into the data buffer
-        // When storing we always store the _maxNodes size. This prevents the relocation of the IndexPage when elements are added/removed from it.
-        // When loading the nodes the _availableNodes is used to read the nodes data, thus only the actual stored elements are loaded.
-        var nodesData = Data(count: MemoryLayout<Node>.size * Int(_info._maxNodes))
-        nodesData.withUnsafeMutableBytes { dest in
-            _nodes.withUnsafeBytes { source in
-                dest.copyBytes(from: source)
-            }
-        }
-        try storageAccessor.write(data, at: _info._address)
-        try storageAccessor.write(data: nodesData)
-    }
-    ///
-    mutating func _loadInfo(using storageAccessor: StorageAccessor, from address: Address) throws {
-        guard let data = try storageAccessor.read(from: address, upToCount: Address(MemoryLayout<IndexPage.Info>.size)) else { throw LAErrors.ErrorReadingData }
-        try data.withUnsafeBytes { buffer in
-            let in_buffer = buffer.bindMemory(to: IndexPage.Info.self)
-            guard in_buffer.count == 1 else { throw LAErrors.InvalidReadBufferSize }
-            self._info = in_buffer[0]
-        }
-        guard self._info._address == address else { throw LAErrors.InvalidAddressInIndexPage }
-    }
-    ///
-    mutating func _loadNodes(using storageAccessor: StorageAccessor, from address: Address?) throws {
-        if let address = address {
-            try storageAccessor.seek(to: address + Address(MemoryLayout<IndexPage.Info>.size))
-        }
-        let nodesSize = Address(MemoryLayout<Node>.size) * _info._availableNodes
-        guard let nodesData = try storageAccessor.read(upToCount: nodesSize) else { throw LAErrors.ErrorReadingData }
-        guard nodesSize == nodesData.count else { throw LAErrors.InvalidReadBufferSize }
-        _nodes = ContiguousArray<Node>(repeating: Node(), count: Int(_info._availableNodes))
-        _nodes.withUnsafeMutableBufferPointer { nodesData.copyBytes(to: $0) }
-    }
-    ///
-    mutating func load(using storageAccessor: StorageAccessor, from address: Address, what: Properties = .All) throws {
-        switch what {
-        case .All:
-            try _loadInfo(using: storageAccessor, from: address)
-            try _loadNodes(using: storageAccessor, from: nil) // the Storage should already be positioned at the start of the Nodes section so seek is not needed.
-        case .Info:
-            try _loadInfo(using: storageAccessor, from: address)
-        case .Nodes:
-            try _loadNodes(using: storageAccessor, from: address)
-        }
-        ///
-//        guard let data = try storageAccessor.read(from: address, upToCount: Address(MemoryLayout<IndexPage.Info>.size)) else { throw LAErrors.ErrorReadingData }
-//        try data.withUnsafeBytes { buffer in
-//            let in_buffer = buffer.bindMemory(to: IndexPage.Info.self)
-//            guard in_buffer.count == 1 else { throw LAErrors.InvalidReadBufferSize }
-//            self._info = in_buffer[0]
-//        }
-//        let nodesSize = Address(MemoryLayout<Node>.size) * _info._availableNodes
-//        guard let nodesData = try storageAccessor.read(upToCount: nodesSize) else { throw LAErrors.ErrorReadingData }
-//        guard nodesSize == nodesData.count else { throw LAErrors.InvalidReadBufferSize }
-//        _nodes = ContiguousArray<Node>(repeating: Node(), count: Int(_info._availableNodes))
-//        _nodes.withUnsafeMutableBufferPointer { nodesData.copyBytes(to: $0) }
-    }
-}

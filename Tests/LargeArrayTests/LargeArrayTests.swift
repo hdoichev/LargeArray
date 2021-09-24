@@ -4,6 +4,7 @@ import Compression
 
 @available(macOS 10.15.4, *)
 final class LargeArrayTests: XCTestCase {
+    let file_path = "/Users/hristo/junk/Test.LargeArray"
     let elements_count = 10
     func testStoreArrayToData() {
         var nodes = ContiguousArray<Node>(repeating: Node(address: 0, used: 0, reserved: 0), count: elements_count)
@@ -41,25 +42,106 @@ final class LargeArrayTests: XCTestCase {
 //        loadedNodes.forEach { $0.dump() }
     }
     ///
+    func testCreateEmptyLargeArray() {
+        do {
+            let la = LargeArray(path: file_path)
+            XCTAssertNotNil(la)
+            guard let la = la else { return }
+            print("Version: \(la._header)")
+        } catch {}
+        // read the file
+        do {
+            let la = LargeArray(path: file_path)
+            XCTAssertNotNil(la)
+            guard let la = la else { return }
+            print("Version: \(la._header)")
+        } catch {}
+    }
+    ///
+    func testAppendNode() {
+        do {
+            var la = LargeArray(path: file_path)
+            XCTAssertNotNil(la)
+            guard var la = la else { return }
+            try la.appendNode(Data(repeating: 0, count: 10))
+        } catch {}
+        // read the file
+        do {
+            let la = LargeArray(path: file_path)
+            XCTAssertNotNil(la)
+            guard let la = la else { return }
+            XCTAssertEqual(la._currentPage._nodes.count, 1)
+            la._currentPage._nodes[0].dump()
+        } catch {}
+    }
+    ///
+    func testAppendMultipleNodes() {
+        let numElements = 1024*2
+        do {
+            var la = LargeArray(path: file_path)
+            XCTAssertNotNil(la)
+            guard var la = la else { return }
+            for i in 0..<numElements {
+                try la.appendNode(Data(repeating: UInt8(i % 128), count: 10))
+            }
+            print("Nodes.count = \(la._currentPage._nodes.count)")
+        } catch {}
+        // read the file
+        do {
+            let la = LargeArray(path: file_path)
+            XCTAssertNotNil(la)
+            guard var la = la else { return }
+//            XCTAssertEqual(la._currentPage._nodes.count, numElements)
+//            for i in 0..<numElements {
+//                la._currentPage._nodes[i].dump()
+//            }
+            for i in stride(from: 0, to: numElements, by: 100) {
+                let node = try la.getNodeFor(index: i)
+                print("Index: \(i): \(node), \(la._currentPage)")
+            }
+        } catch {
+            print(error)
+        }
+    }
+    ///
     func testStoreLoadNode() {
         var node = Node()
         var node2 = Node()
         var data = Data(repeating: 0, count: MemoryLayout<Node>.size)
         do {
-            try data.withUnsafeBytes { try node.load(from: $0) }
-            node.dump()
             node.address = 8_555_777_333
             node.used = 123
             node.reserved = 456
-            try data.withUnsafeMutableBytes { try node.store(into: $0) }
-            try data.withUnsafeBytes { try node2.load(from: $0) }
+            data = try _store(from: node)
+            try _load(into: &node2, from: data)
             node2.dump()
+            XCTAssertEqual(node, node2, "Nodes are the equal.")
         } catch {
             print("Error: \(error)")
         }
         print("data.count = \(data.count)")
-        MemoryLayout<IndexPage>.printInfo()
     }
+    func testStoreLoadNodePerformance() {
+        var node = Node()
+        var node2 = Node()
+        var data = Data(repeating: 0, count: MemoryLayout<Node>.size)
+        measure {
+            do {
+                for i in 0..<100_000 {
+                    node.address = Address(i)
+                    node.used = 123
+                    node.reserved = 456
+                    data = try _store(from: node)
+                    try _load(into: &node2, from: data)
+                    XCTAssertEqual(node, node2, "Nodes are the equal.")
+                }
+            } catch {
+                print("Error: \(error)")
+            }
+        }
+        print("data.count = \(data.count)")
+    }
+    ///
     func testJsonEncoder() {
         var a1 = ContiguousArray<Node>()
         let a1_2 = ContiguousArray<Node>(repeating: Node(), count: elements_count)
