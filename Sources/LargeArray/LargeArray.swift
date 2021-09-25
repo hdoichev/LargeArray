@@ -13,7 +13,8 @@ enum LAErrors: Error {
     case ErrorReadingData
     case InvalidAddressInIndexPage
     case InvalidFileVersion
-    case CorruptedIndex
+    case IndexMismatch
+    case CorruptedPageAddress
 }
 
 typealias Address = UInt64
@@ -31,7 +32,7 @@ protocol StorageAccessor {
 public let _LA_VERSION: Int = 1
 struct Header: Codable {
     let _version: Int
-    var _count: UInt64 /// Total number of lelements in the Array
+    var _count: Int /// Total number of lelements in the Array
 }
 ///
 struct Node: Codable {
@@ -62,82 +63,29 @@ struct Node: Codable {
 ///
 ///
 @available(macOS 10.15.4, *)
-public struct LargeArray /*: MutableCollection, RandomAccessCollection */{
-    public typealias Element = Any
+public class LargeArray /*: MutableCollection, RandomAccessCollection */{
+    public typealias Element = Data
     public typealias Index = Int /// TODO: Change this UInt64
 //    public typealias Address = UInt64
     
     var _header: Header
     let _maxElementsPerPage: Index
     var _currentPage: IndexPage
+    @usableFromInline
     var _currentPage_startIndex: Index
     ///
     var _fileHandle: FileHandle
-//    var _currentPageNode: Node
-    @usableFromInline
-    var _storage: [Any]
     ///
-    mutating func appendNode(_ data:Data) throws {
-        if _currentPage._nodes.count >= _maxElementsPerPage {
-            try createNewCurrentPage()
+    private var totalCount: Index {
+        get {
+            _header._count
         }
-        // Store the data and create a node to point to it.
-        let node = try Node(address: _fileHandle.seekToEnd(), used: Address(data.count), reserved: Address(data.count))
-        try _fileHandle.write(contentsOf: data)
-        
-        // update the IndexPage and store that too??? Or store the IndexPage only after a number of changes have occurred.
-        _currentPage._nodes.append(node)
-        try _currentPage.store(using: _fileHandle) // store All
-    }
-    ///
-    mutating func removeNode(at position: Index) {
-        
-    }
-    ///
-    mutating func createNewCurrentPage() throws {
-        var newPage = IndexPage(address: _fileHandle.seekToEndOfFile(), maxNodes: _maxElementsPerPage)
-        newPage._info._prev = _currentPage._info._address
-        // First: Store the new page, thus when the current_page.next is updated it will point to a properly stored data.
-        try newPage.store(using: _fileHandle)
-        // Second: Store the updated NexPageAddress of the current page.
-        _currentPage._info._next = newPage._info._address
-        try _currentPage.store(using: _fileHandle, what: .Info)
-        // Last: Set the new page as the current page and update related properties.
-        _currentPage_startIndex = _currentPage_startIndex + Index(_currentPage._nodes.count)
-//        print("CurrentPage: \(_currentPage)")
-//        print("NewPage: \(newPage)")
-        _currentPage = newPage
-    }
-    ///
-    func isItemIndexInCurrentPage(index: Index) -> Bool {
-        return (_currentPage_startIndex..<(_currentPage_startIndex+_currentPage._nodes.count)).contains(index)
-    }
-    ///
-    mutating func loadPageFor(index: Index) throws {
-        guard isItemIndexInCurrentPage(index: index) == false else { return }
-        let traverseUp = (index < _currentPage_startIndex)
-        var page = IndexPage(address: 0, maxNodes: _maxElementsPerPage)
-        while isItemIndexInCurrentPage(index: index) == false {
-            guard traverseUp == (index < _currentPage_startIndex) else { throw LAErrors.CorruptedIndex }
-            let addressToLoad = traverseUp ? _currentPage._info._prev : _currentPage._info._next
-            guard addressToLoad != 0 else { throw LAErrors.CorruptedIndex }
-            try page.load(using: _fileHandle, from: addressToLoad, what: .Info)
-            traverseUp ? (_currentPage_startIndex -= page._info._availableNodes) :
-                         (_currentPage_startIndex += page._info._availableNodes)
+        set {
+            if newValue < 0 { fatalError("Invalid array count.") }
+            _header._count = newValue
         }
-        _currentPage = page
-        try _currentPage.load(using: _fileHandle, from: page._info._address, what: .Nodes)
     }
     ///
-    mutating func getNodeFor(index: Index) throws -> Node {
-        try loadPageFor(index: index)
-        return _currentPage._nodes[index - _currentPage_startIndex]
-    }
-}
-
-
-@available(macOS 10.15.4, *)
-extension LargeArray: MutableCollection, RandomAccessCollection {
     init?(path: String, maxPerPage: Index = 1024) {
         if FileManager.default.fileExists(atPath: path) == false {
             FileManager.default.createFile(atPath: path, contents: nil)
@@ -153,8 +101,7 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
         let rootPageaddress: Address = Address(MemoryLayout<Header>.size)
         _currentPage = IndexPage(address: rootPageaddress, maxNodes: _maxElementsPerPage)
         _currentPage_startIndex = 0
-        _storage = [Any]()
-
+        
         let fileSize = _fileHandle.seekToEndOfFile()
         if fileSize > MemoryLayout<Header>.size {
             do {
@@ -181,37 +128,168 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
             }
         }
     }
-    
-    @inlinable public var startIndex: Index {
-        return _storage.startIndex
+    ///
+    func createNode(with data: Data) throws -> Node {
+        // Store the data and create a node to point to it.
+        let node = try Node(address: _fileHandle.seekToEnd(), used: Address(data.count), reserved: Address(data.count))
+        try _fileHandle.write(contentsOf: data)
+        return node
     }
-    @inlinable public var endIndex: Index {
-        return _storage.endIndex
+    ///
+    /*mutating*/ func removeNode(at position: Index) {
+        
+    }
+    ///
+    /*mutating*/ func createNewCurrentPage() throws {
+        var newPage = IndexPage(address: _fileHandle.seekToEndOfFile(), maxNodes: _maxElementsPerPage)
+        newPage._info._prev = _currentPage._info._address
+        // First: Store the new page, thus when the current_page.next is updated it will point to a properly stored data.
+        try newPage.store(using: _fileHandle)
+        // Second: Store the updated NexPageAddress of the current page.
+        _currentPage._info._next = newPage._info._address
+        try _currentPage.store(using: _fileHandle, what: .Info)
+        // Last: Set the new page as the current page and update related properties.
+        _currentPage_startIndex = _currentPage_startIndex + Index(_currentPage._nodes.count)
+//        print("CurrentPage: \(_currentPage)")
+//        print("NewPage: \(newPage)")
+        _currentPage = newPage
+    }
+    ///
+    @inlinable
+    func indexRelativeToCurrent(_ index: Index) -> Index {
+        return index - _currentPage_startIndex
+    }
+    ///
+    func isItemIndexInCurrentPage(index: Index) -> Bool {
+        return (0..<_currentPage._nodes.count).contains(indexRelativeToCurrent(index))
+    }
+    ///
+    /*mutating*/ func loadPageFor(index: Index) throws {
+        guard isItemIndexInCurrentPage(index: index) == false else { return }
+        let traverseUp = (index < _currentPage_startIndex)
+//        var page = IndexPage(address: 0, maxNodes: _maxElementsPerPage)
+        while isItemIndexInCurrentPage(index: index) == false {
+            guard traverseUp == (index < _currentPage_startIndex) else { throw LAErrors.IndexMismatch }
+            let addressToLoad = traverseUp ? _currentPage._info._prev : _currentPage._info._next
+            guard addressToLoad != 0 else {
+                throw LAErrors.CorruptedPageAddress
+            }
+            try _currentPage.load(using: _fileHandle, from: addressToLoad, what: .Info)
+            if traverseUp { _currentPage_startIndex -= _currentPage._info._availableNodes }
+            else          { _currentPage_startIndex += _currentPage._info._availableNodes }
+        }
+//        _currentPage = page
+        try _currentPage.load(using: _fileHandle, from: _currentPage._info._address, what: .Nodes)
+    }
+    ///
+    /*mutating*/ func getNodeFor(index: Index) throws -> Node {
+        try loadPageFor(index: index)
+        return _currentPage._nodes[indexRelativeToCurrent(index)]
+    }
+    ///
+    func addNodeToFreePool(_ node: Node) {
+        
+    }
+    ///
+    func adjustCurrentPageIfRequired() {
+        if _currentPage._nodes.count == 0 {
+            // The current Page is empty so load a page with proper indexes, if available.
+            // If there are no other pages with data, then we start from the root
+            if _currentPage._info._prev != 0 || _currentPage._info._next != 0 {
+            } else {
+                // There are no page with data - the array is empty
+            }
+        }
+    }
+}
+
+
+@available(macOS 10.15.4, *)
+extension LargeArray: MutableCollection, RandomAccessCollection {
+    @inlinable public var startIndex: Index {
+        return 0
+    }
+//    @inlinable
+    public var endIndex: Index {
+        return _header._count
     }
     @inlinable public func index(after i: Index) -> Index {
         return i + 1
     }
     
-    @inlinable public subscript(position: Index) -> Any {
+//    @inlinable
+    public subscript(position: Index) -> Data {
+//    public subscript<T: Decodable>(position: Index) -> T {
         get {
-            return _storage[position]
+            do {
+                let node = try getNodeFor(index: position)
+                guard let nodeData = try _fileHandle.read(from: node.address, upToCount: node.used) else { throw LAErrors.ErrorReadingData }
+                return nodeData
+            } catch {
+                fatalError("\(error.localizedDescription) - Position: \(position)")
+            }
         }
         set {
-            _storage[position] = newValue
+            do {
+                let node = try getNodeFor(index: position)
+                if node.reserved < newValue.count {
+                    // TODO: Move the old node+data for reuse.
+                    // Create a new node
+                    let newNode = try createNode(with: newValue)
+                    addNodeToFreePool(node)
+                    _currentPage._nodes[indexRelativeToCurrent(position)] = newNode
+                    try _currentPage.store(using: _fileHandle, what: .Nodes)
+                }
+            } catch {
+                fatalError(error.localizedDescription)
+            }
         }
     }
-    @inlinable public func append<T:Codable>(_ newElement:T) {
+//    @inlinable
+//    public /*mutating*/ func append<T:Codable>(_ newElement:T) throws {
+    public /*mutating*/ func append(_ newElement: Data) throws {
+        if _currentPage._nodes.count >= _maxElementsPerPage {
+            try createNewCurrentPage()
+        }
         
+        // update the IndexPage and store that too??? Or store the IndexPage only after a number of changes have occurred.
+        try _currentPage._nodes.append(createNode(with: newElement))
+        try _currentPage.store(using: _fileHandle) // store All
+        totalCount += 1
     }
-    @inlinable public func remove(at position:Index) {
+//    @inlinable
+    public func remove(at position: Index) throws {
+        let node = try getNodeFor(index: position)
+        _currentPage._nodes.remove(at: indexRelativeToCurrent(position))
+        // TODO: Move the old node+data for reuse.
+        addNodeToFreePool(node)
         
+        try _currentPage.store(using: _fileHandle)
+        totalCount -= 1
+        adjustCurrentPageIfRequired()
     }
 }
-
+@available(macOS 10.15.4, *)
+extension LargeArray: CustomStringConvertible {
+    public var description: String {
+        """
+        \(LargeArray.self)
+        \(self._header)
+        currentPage_StartIndex: \(_currentPage_startIndex)
+        \(_currentPage)
+        """
+    }
+}
+///
+extension Header: CustomStringConvertible {
+    var description: String {
+        "\(Header.self): version: \(_version), count: \(_count)"
+    }
+}
 ///
 extension MemoryLayout {
-    static func printInfo() {
-        print(T.self, ":", MemoryLayout<T>.size, ", ", MemoryLayout<T>.alignment, ", ", MemoryLayout<T>.stride)
+    static var description: String {
+        "\(T.self) : \(MemoryLayout<T>.size), \(MemoryLayout<T>.alignment), \(MemoryLayout<T>.stride)"
     }
 }
 
@@ -257,3 +335,17 @@ extension FileHandle: StorageAccessor {
     }
 }
 
+extension LAErrors: CustomStringConvertible {
+    var description: String {
+        switch self {
+        case .ErrorReadingData: return "ErrorRadingData"
+        case .InvalidWriteBufferSize: return "InvalidWriteBufferSize"
+        case .InvalidReadBufferSize: return "InvalidReadBufferSize"
+        case .CorruptedPageAddress: return "CorruptedPageAddress"
+        case .IndexMismatch: return "IndexMismatch"
+        case .InvalidAddressInIndexPage: return "InvalidAddressInIndexPage"
+        case .InvalidFileVersion: return "InvalidFileVersion"
+        case .NilBaseAddress: return "NilBaseAddress"
+        }
+    }
+}

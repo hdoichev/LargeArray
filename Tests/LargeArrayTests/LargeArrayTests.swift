@@ -6,6 +6,14 @@ import Compression
 final class LargeArrayTests: XCTestCase {
     let file_path = "/Users/hristo/junk/Test.LargeArray"
     let elements_count = 10
+    ///
+    override func setUp() {
+        if FileManager.default.fileExists(atPath: file_path) {
+            do { try FileManager.default.removeItem(atPath: file_path) }
+            catch { fatalError("Can not remove test file.")}
+        }
+    }
+    ///
     func testStoreArrayToData() {
         var nodes = ContiguousArray<Node>(repeating: Node(address: 0, used: 0, reserved: 0), count: elements_count)
         let nodesDataSize = MemoryLayout<Node>.size * Int(elements_count)
@@ -63,7 +71,7 @@ final class LargeArrayTests: XCTestCase {
             var la = LargeArray(path: file_path)
             XCTAssertNotNil(la)
             guard var la = la else { return }
-            try la.appendNode(Data(repeating: 0, count: 10))
+            try la.append(Data(repeating: 0, count: 10))
         } catch {}
         // read the file
         do {
@@ -82,7 +90,7 @@ final class LargeArrayTests: XCTestCase {
             XCTAssertNotNil(la)
             guard var la = la else { return }
             for i in 0..<numElements {
-                try la.appendNode(Data(repeating: UInt8(i % 128), count: 10))
+                try la.append(Data(repeating: UInt8(i % 128), count: 10))
             }
             print("Nodes.count = \(la._currentPage._nodes.count)")
         } catch {}
@@ -97,11 +105,59 @@ final class LargeArrayTests: XCTestCase {
 //            }
             for i in stride(from: 0, to: numElements, by: 100) {
                 let node = try la.getNodeFor(index: i)
-                print("Index: \(i): \(node), \(la._currentPage)")
+//                print("Index: \(i): \(node), \(la._currentPage)")
+                print("Index: \(i): \(node)")
             }
+            
+            for n in la { XCTAssertEqual(n.count, 10) }
+            la.forEach { XCTAssertEqual($0.count, 10) }
+            
+            la[0] = Data(repeating: 19, count: 19)
+            XCTAssertEqual(la[0].count, 19)
+            print(la)
+//            print(MemoryLayout<Node>.description)
+//            print(la._currentPage._nodes[10000].reserved)
         } catch {
             print(error)
         }
+    }
+    ///
+    func testAppendManyNodeToArrayPerformance() {
+        let numElements = 1024*10
+        do {
+            let la = LargeArray(path: file_path)
+            XCTAssertNotNil(la)
+            guard let la = la else { return }
+            measure {
+                do {
+                    for i in 0..<numElements {
+                        XCTAssertNoThrow( try la.append(Data(repeating: UInt8(i % 128), count: 10)))
+                    }
+                } catch {
+                    XCTFail()
+                }
+            }
+            print(la)
+        } catch {}
+    }
+    ///
+    func testTraverseAllElementsInArrayPerformance() {
+        let numElements = 1024*10
+        do {
+            let la = LargeArray(path: file_path)
+            XCTAssertNotNil(la)
+            guard let la = la else { return }
+            for i in 0..<numElements {
+                try la.append(Data(repeating: UInt8(i % 128), count: 10))
+            }
+            print(la)
+            measure {
+                for n in la { XCTAssertEqual(n.count, 10) }
+            }
+//            measure {
+//                la.forEach { XCTAssertEqual($0.count, 10) }
+//            }
+        } catch {}
     }
     ///
     func testStoreLoadNode() {
@@ -146,11 +202,6 @@ final class LargeArrayTests: XCTestCase {
         var a1 = ContiguousArray<Node>()
         let a1_2 = ContiguousArray<Node>(repeating: Node(), count: elements_count)
         a1.reserveCapacity(elements_count)
-        MemoryLayout<UInt64>.printInfo()
-        MemoryLayout<UInt32>.printInfo()
-        MemoryLayout<UInt16>.printInfo()
-        MemoryLayout<UInt8>.printInfo()
-        MemoryLayout<Node>.printInfo()
         for _ in 0..<elements_count {
             a1.append(Node(address: UInt64.random(in: 100_000_000..<8_000_000_000_000_000),
                            used: UInt64.random(in: 1_000_000..<8_000_000),
