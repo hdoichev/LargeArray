@@ -45,7 +45,7 @@ struct IndexPage: Codable {
     init(address: Address, maxNodes: LargeArray.Index) {
         _info = Info(_address: address, _availableNodes: 0, _maxNodes: maxNodes, _next: 0, _prev: 0)
         _nodes = ContiguousArray<Node>()
-        _dirty = Dirty()
+        _dirty = Dirty(info: true, nodes: true)
     }
     ///
     mutating func appendNode(_ node: Node) {
@@ -76,26 +76,34 @@ struct IndexPage: Codable {
 @available(macOS 10.15.4, *)
 extension IndexPage {
     ///
-    mutating func store(using storageAccessor: StorageAccessor, what: Properties = .All) throws {
+    mutating func store(using storageAccessor: StorageAccessor) throws {
         guard _dirty.isDirty else { return }
-        _info._availableNodes = _nodes.count // preserve the count of the actual nodes, so we can properly load the nodes data
-        var data = Data(count: MemoryLayout<Info>.size)
-        data.withUnsafeMutableBytes { buffer in
-            let out_buffer = buffer.bindMemory(to: Info.self)
-            out_buffer[0] = _info
+        if _dirty.info {
+            _info._availableNodes = _nodes.count // preserve the count of the actual nodes, so we can properly load the nodes data
+            var data = Data(count: MemoryLayout<Info>.size)
+            data.withUnsafeMutableBytes { buffer in
+                let out_buffer = buffer.bindMemory(to: Info.self)
+                out_buffer[0] = _info
+            }
+            try storageAccessor.write(data, at: _info._address)
+            _dirty.info = false
+        } else {
+            try storageAccessor.seek(to: _info._address + Address(MemoryLayout<Info>.size))
         }
         // Store the nodes into the data buffer
         // When storing we always store the _maxNodes size. This prevents the relocation of the IndexPage when elements are added/removed from it.
         // When loading the nodes the _availableNodes is used to read the nodes data, thus only the actual stored elements are loaded.
         //        var nodesData = Data(count: MemoryLayout<Node>.size * Int(_info._maxNodes))
-        var nodesData = Data(repeating: 0, count: MemoryLayout<Node>.size * Int(_info._maxNodes))
-        nodesData.withUnsafeMutableBytes { dest in
-            _nodes.withUnsafeBytes { source in
-                dest.copyBytes(from: source)
+        if _dirty.nodes {
+            var nodesData = Data(repeating: 0, count: MemoryLayout<Node>.size * Int(_info._maxNodes))
+            nodesData.withUnsafeMutableBytes { dest in
+                _nodes.withUnsafeBytes { source in
+                    dest.copyBytes(from: source)
+                }
             }
+            _dirty.nodes = false
+            try storageAccessor.write(data: nodesData)
         }
-        try storageAccessor.write(data, at: _info._address)
-        try storageAccessor.write(data: nodesData)
     }
     ///
     mutating func _loadInfo(using storageAccessor: StorageAccessor, from address: Address) throws {

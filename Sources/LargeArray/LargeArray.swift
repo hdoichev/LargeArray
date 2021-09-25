@@ -150,7 +150,7 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
         try newPage.store(using: _fileHandle)
         // Second: Store the updated NexPageAddress of the current page.
         _currentPage.info._next = newPage.info._address
-        try _currentPage.store(using: _fileHandle, what: .Info)
+        try _currentPage.store(using: _fileHandle)
         // Last: Set the new page as the current page and update related properties.
         _currentPage_startIndex = _currentPage_startIndex + Index(_currentPage.info._availableNodes)
 //        print("CurrentPage: \(_currentPage)")
@@ -169,8 +169,8 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
     ///
     /*mutating*/ func loadPageFor(index: Index) throws {
         guard isItemIndexInCurrentPage(index: index) == false else { return }
+        try _currentPage.store(using: _fileHandle)
         let traverseUp = (index < _currentPage_startIndex)
-//        var page = IndexPage(address: 0, maxNodes: _maxElementsPerPage)
         while isItemIndexInCurrentPage(index: index) == false {
             guard traverseUp == (index < _currentPage_startIndex) else { throw LAErrors.IndexMismatch }
             let addressToLoad = traverseUp ? _currentPage.info._prev : _currentPage.info._next
@@ -181,7 +181,6 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
             traverseUp ? ( _currentPage_startIndex -= _currentPage.info._availableNodes ) :
                          ( _currentPage_startIndex += _currentPage.info._availableNodes )
         }
-//        _currentPage = page
         try _currentPage.load(using: _fileHandle, from: _currentPage.info._address, what: .Nodes)
     }
     ///
@@ -245,7 +244,7 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
                     node.used = newValue.count
                     _currentPage.updateNode(at: indexRelativeToCurrentPage(position), node: node)
                 }
-                try _currentPage.store(using: _fileHandle, what: .Nodes)
+//                try _currentPage.store(using: _fileHandle) // Store all ... perhaps later>???
             } catch {
                 fatalError(error.localizedDescription)
             }
@@ -260,7 +259,7 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
         
         // update the IndexPage and store that too??? Or store the IndexPage only after a number of changes have occurred.
         try _currentPage.appendNode(createNode(with: newElement))
-        try _currentPage.store(using: _fileHandle) // store All
+//        try _currentPage.store(using: _fileHandle) // store All ... perhaps later???
         totalCount += 1
     }
 //    @inlinable
@@ -270,7 +269,7 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
         // TODO: Move the old node+data for reuse.
         addNodeToFreePool(node)
         
-        try _currentPage.store(using: _fileHandle)
+//        try _currentPage.store(using: _fileHandle) // store All ... perhaps later???
         totalCount -= 1
         adjustCurrentPageIfRequired()
     }

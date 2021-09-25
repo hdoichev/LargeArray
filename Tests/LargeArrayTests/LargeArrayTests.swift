@@ -142,7 +142,7 @@ final class LargeArrayTests: XCTestCase {
     }
     ///
     func testTraverseAllElementsInArrayPerformance() {
-        let numElements = 1024*10
+        let numElements = 1024*1024
         do {
             let la = LargeArray(path: file_path)
             XCTAssertNotNil(la)
