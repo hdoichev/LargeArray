@@ -20,8 +20,8 @@ final class LargeArrayTests: XCTestCase {
         var nodesData = Data(count: nodesDataSize)
         for i in 0..<nodes.count {
             nodes[i].address = Address(i)
-            nodes[i].used = Address(i)
-            nodes[i].reserved = Address(i)
+            nodes[i].used = i
+            nodes[i].reserved = i
         }
         print("nodes.count = \(nodes.count)")
         print("nodesData.count = \(nodesData.count) (\(nodesDataSize))")
@@ -78,8 +78,8 @@ final class LargeArrayTests: XCTestCase {
             let la = LargeArray(path: file_path)
             XCTAssertNotNil(la)
             guard let la = la else { return }
-            XCTAssertEqual(la._currentPage._nodes.count, 1)
-            la._currentPage._nodes[0].dump()
+            XCTAssertEqual(la._currentPage.info._availableNodes, 1)
+//            la[0].dump()
         } catch {}
     }
     ///
@@ -92,7 +92,7 @@ final class LargeArrayTests: XCTestCase {
             for i in 0..<numElements {
                 try la.append(Data(repeating: UInt8(i % 128), count: 10))
             }
-            print("Nodes.count = \(la._currentPage._nodes.count)")
+            print("Nodes.count = \(la._currentPage.info._availableNodes)")
         } catch {}
         // read the file
         do {
@@ -204,8 +204,8 @@ final class LargeArrayTests: XCTestCase {
         a1.reserveCapacity(elements_count)
         for _ in 0..<elements_count {
             a1.append(Node(address: UInt64.random(in: 100_000_000..<8_000_000_000_000_000),
-                           used: UInt64.random(in: 1_000_000..<8_000_000),
-                           reserved: UInt64.random(in: 8_000_000..<16_000_000)))
+                           used: Int.random(in: 1_000_000..<8_000_000),
+                           reserved: Int.random(in: 8_000_000..<16_000_000)))
         }
         print("\(a1.capacity) : \(a1_2.capacity)")
         let sdata1 = try! JSONEncoder().encode(a1)

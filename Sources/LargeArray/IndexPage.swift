@@ -20,17 +20,64 @@ struct IndexPage: Codable {
         var _next: Address
         var _prev: Address
     }
-    var _info: Info
-    var _nodes: ContiguousArray<Node>
+    struct Dirty: Codable {
+        var info: Bool = false
+        var nodes: Bool = false
+        var isDirty: Bool { info || nodes }
+    }
+    var info: Info {
+        get { return _info }
+        set {
+            if _info != newValue {
+                _info = newValue
+                _dirty.info = true
+            }
+        }
+    }
+    var dirty: Dirty {
+        _dirty
+    }
+    
+    private var _info: Info
+    private var _nodes: ContiguousArray<Node>
+    private var _dirty: Dirty
+    ///
     init(address: Address, maxNodes: LargeArray.Index) {
         _info = Info(_address: address, _availableNodes: 0, _maxNodes: maxNodes, _next: 0, _prev: 0)
         _nodes = ContiguousArray<Node>()
+        _dirty = Dirty()
+    }
+    ///
+    mutating func appendNode(_ node: Node) {
+        _dirty.nodes = true
+        _nodes.append(node)
+        info._availableNodes += 1
+    }
+    ///
+    mutating func removeNode(at position: LargeArray.Index) {
+        _dirty.nodes = true
+        _nodes.remove(at: position)
+        info._availableNodes -= 1
+    }
+    ///
+    mutating func updateNode(at position: LargeArray.Index, node: Node) {
+        _dirty.nodes = true
+        _nodes[position] = node
+    }
+    ///
+    func node(at position: LargeArray.Index) -> Node {
+        return _nodes[position]
+    }
+    ///
+    func isValidIndex(_ position: LargeArray.Index) -> Bool {
+        return (0..<_nodes.count).contains(position)
     }
 }
 @available(macOS 10.15.4, *)
 extension IndexPage {
-    /// "at" always points to the location where the entire page can be stored.
+    ///
     mutating func store(using storageAccessor: StorageAccessor, what: Properties = .All) throws {
+        guard _dirty.isDirty else { return }
         _info._availableNodes = _nodes.count // preserve the count of the actual nodes, so we can properly load the nodes data
         var data = Data(count: MemoryLayout<Info>.size)
         data.withUnsafeMutableBytes { buffer in
@@ -52,7 +99,7 @@ extension IndexPage {
     }
     ///
     mutating func _loadInfo(using storageAccessor: StorageAccessor, from address: Address) throws {
-        guard let data = try storageAccessor.read(from: address, upToCount: Address(MemoryLayout<IndexPage.Info>.size)) else { throw LAErrors.ErrorReadingData }
+        guard let data = try storageAccessor.read(from: address, upToCount: MemoryLayout<IndexPage.Info>.size) else { throw LAErrors.ErrorReadingData }
         try data.withUnsafeBytes { buffer in
             let in_buffer = buffer.bindMemory(to: IndexPage.Info.self)
             guard in_buffer.count == 1 else { throw LAErrors.InvalidReadBufferSize }
@@ -67,7 +114,7 @@ extension IndexPage {
             try storageAccessor.seek(to: address + Address(MemoryLayout<IndexPage.Info>.size))
         }
         let nodesSize = MemoryLayout<Node>.size * _info._availableNodes
-        guard let nodesData = try storageAccessor.read(bytesCount: Address(nodesSize)) else { throw LAErrors.ErrorReadingData }
+        guard let nodesData = try storageAccessor.read(bytesCount: nodesSize) else { throw LAErrors.ErrorReadingData }
         guard nodesSize == nodesData.count else { throw LAErrors.InvalidReadBufferSize }
         _nodes = ContiguousArray<Node>(repeating: Node(), count: Int(_info._availableNodes))
         _nodes.withUnsafeMutableBufferPointer { nodesData.copyBytes(to: $0) }
@@ -93,4 +140,16 @@ extension IndexPage: CustomStringConvertible {
         Page(Address: \(_info._address), AvailableNodes: \(_info._availableNodes) (\(_nodes.count)), Prev: \(_info._prev), Next: \(_info._next))
         """
     }
+}
+
+@available(macOS 10.15.4, *)
+extension IndexPage.Info: Equatable {
+//    static func == (lhs: IndexPage.Info, rhs: IndexPage.Info) -> Bool {
+//        return
+//        (lhs._address == rhs._address &&
+//         lhs._availableNodes == rhs._availableNodes &&
+//         lhs._maxNodes == rhs._maxNodes &&
+//         lhs._next == rhs._next &&
+//         lhs._prev == rhs._prev)
+//    }
 }

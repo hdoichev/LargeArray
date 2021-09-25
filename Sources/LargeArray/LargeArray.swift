@@ -23,8 +23,8 @@ typealias Address = UInt64
 protocol StorageAccessor {
     func write<T: DataProtocol>(_ data: T, at address: Address) throws
     func write<T: DataProtocol>(data: T) throws
-    func read(from address: Address, upToCount: Address) throws -> Data?
-    func read(bytesCount: Address) throws -> Data?
+    func read(from address: Address, upToCount: Int) throws -> Data?
+    func read(bytesCount: Int) throws -> Data?
     func seek(to: Address) throws
 }
 
@@ -37,29 +37,32 @@ struct Header: Codable {
 ///
 struct Node: Codable {
     var address: Address = 0
-    var used: Address = 0
-    var reserved: Address = 0
+    var used: Int = 0
+    var reserved: Int = 0
 }
 
 ///
 ///  LargeArray structure:
 ///   Header:
 ///     Version: Int
-///     Count: UInt64  // the number of elements in the array
-///     MaxNodesPerPage: UInt64 // The number of node per page. This help calculate the page size.
+///     Count: Int  // the number of elements in the array
+///     MaxNodesPerPage: Int // The number of node per page. This help calculate the page size.
 ///   IndexPage:
-///     availableNodes: UInt64 // The nodes available in this page
-///     nextPage: UInt64  // Next page address (if any)
-///     prevPage: Uint64  // Previous page address (if any)
+///     Info:
+///         address: Address - the address of the page
+///         _availableNodes: LargeArray.Index - how many nodes are stored in this page
+///         _maxNodes: LargeArray.Index - maximum nodes per page
+///         _next: Address - next node, if any
+///         _prev: Address - previous node, if any
 ///     nodes: ContiguousArray<Node>
-///     --- The Nodes are stored immediately after the IndexPage information ---
+///     --- The Nodes are stored immediately after the IndexPage.Info information ---
 ///
 ///    ... the rest is a mixture of Objects data (which is pointed to by the Nodes) and additional IndexPages
 ///
 ///  Node:
 ///     address: UInt64
-///     used: UInt64
-///     reserved: Uint64
+///     used: Int
+///     reserved: Int
 ///
 ///
 @available(macOS 10.15.4, *)
@@ -131,7 +134,7 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
     ///
     func createNode(with data: Data) throws -> Node {
         // Store the data and create a node to point to it.
-        let node = try Node(address: _fileHandle.seekToEnd(), used: Address(data.count), reserved: Address(data.count))
+        let node = try Node(address: _fileHandle.seekToEnd(), used: data.count, reserved: data.count)
         try _fileHandle.write(contentsOf: data)
         return node
     }
@@ -142,26 +145,26 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
     ///
     /*mutating*/ func createNewCurrentPage() throws {
         var newPage = IndexPage(address: _fileHandle.seekToEndOfFile(), maxNodes: _maxElementsPerPage)
-        newPage._info._prev = _currentPage._info._address
+        newPage.info._prev = _currentPage.info._address
         // First: Store the new page, thus when the current_page.next is updated it will point to a properly stored data.
         try newPage.store(using: _fileHandle)
         // Second: Store the updated NexPageAddress of the current page.
-        _currentPage._info._next = newPage._info._address
+        _currentPage.info._next = newPage.info._address
         try _currentPage.store(using: _fileHandle, what: .Info)
         // Last: Set the new page as the current page and update related properties.
-        _currentPage_startIndex = _currentPage_startIndex + Index(_currentPage._nodes.count)
+        _currentPage_startIndex = _currentPage_startIndex + Index(_currentPage.info._availableNodes)
 //        print("CurrentPage: \(_currentPage)")
 //        print("NewPage: \(newPage)")
         _currentPage = newPage
     }
     ///
     @inlinable
-    func indexRelativeToCurrent(_ index: Index) -> Index {
+    func indexRelativeToCurrentPage(_ index: Index) -> Index {
         return index - _currentPage_startIndex
     }
     ///
     func isItemIndexInCurrentPage(index: Index) -> Bool {
-        return (0..<_currentPage._nodes.count).contains(indexRelativeToCurrent(index))
+        return _currentPage.isValidIndex(indexRelativeToCurrentPage(index))
     }
     ///
     /*mutating*/ func loadPageFor(index: Index) throws {
@@ -170,32 +173,32 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
 //        var page = IndexPage(address: 0, maxNodes: _maxElementsPerPage)
         while isItemIndexInCurrentPage(index: index) == false {
             guard traverseUp == (index < _currentPage_startIndex) else { throw LAErrors.IndexMismatch }
-            let addressToLoad = traverseUp ? _currentPage._info._prev : _currentPage._info._next
+            let addressToLoad = traverseUp ? _currentPage.info._prev : _currentPage.info._next
             guard addressToLoad != 0 else {
                 throw LAErrors.CorruptedPageAddress
             }
             try _currentPage.load(using: _fileHandle, from: addressToLoad, what: .Info)
-            if traverseUp { _currentPage_startIndex -= _currentPage._info._availableNodes }
-            else          { _currentPage_startIndex += _currentPage._info._availableNodes }
+            traverseUp ? ( _currentPage_startIndex -= _currentPage.info._availableNodes ) :
+                         ( _currentPage_startIndex += _currentPage.info._availableNodes )
         }
 //        _currentPage = page
-        try _currentPage.load(using: _fileHandle, from: _currentPage._info._address, what: .Nodes)
+        try _currentPage.load(using: _fileHandle, from: _currentPage.info._address, what: .Nodes)
     }
     ///
     /*mutating*/ func getNodeFor(index: Index) throws -> Node {
         try loadPageFor(index: index)
-        return _currentPage._nodes[indexRelativeToCurrent(index)]
+        return _currentPage.node(at: indexRelativeToCurrentPage(index))
     }
     ///
     func addNodeToFreePool(_ node: Node) {
         
     }
-    ///
+    /// When nodes are removed the current page can become empty and perhaps a page with some data should be loaded. Perhaps not?!?!?
     func adjustCurrentPageIfRequired() {
-        if _currentPage._nodes.count == 0 {
+        if _currentPage.info._availableNodes == 0 {
             // The current Page is empty so load a page with proper indexes, if available.
             // If there are no other pages with data, then we start from the root
-            if _currentPage._info._prev != 0 || _currentPage._info._next != 0 {
+            if _currentPage.info._prev != 0 || _currentPage.info._next != 0 {
             } else {
                 // There are no page with data - the array is empty
             }
@@ -231,15 +234,18 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
         }
         set {
             do {
-                let node = try getNodeFor(index: position)
+                var node = try getNodeFor(index: position)
                 if node.reserved < newValue.count {
                     // TODO: Move the old node+data for reuse.
                     // Create a new node
                     let newNode = try createNode(with: newValue)
                     addNodeToFreePool(node)
-                    _currentPage._nodes[indexRelativeToCurrent(position)] = newNode
-                    try _currentPage.store(using: _fileHandle, what: .Nodes)
+                    _currentPage.updateNode(at: indexRelativeToCurrentPage(position), node: newNode)
+                } else {
+                    node.used = newValue.count
+                    _currentPage.updateNode(at: indexRelativeToCurrentPage(position), node: node)
                 }
+                try _currentPage.store(using: _fileHandle, what: .Nodes)
             } catch {
                 fatalError(error.localizedDescription)
             }
@@ -248,19 +254,19 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
 //    @inlinable
 //    public /*mutating*/ func append<T:Codable>(_ newElement:T) throws {
     public /*mutating*/ func append(_ newElement: Data) throws {
-        if _currentPage._nodes.count >= _maxElementsPerPage {
+        if _currentPage.info._availableNodes >= _maxElementsPerPage {
             try createNewCurrentPage()
         }
         
         // update the IndexPage and store that too??? Or store the IndexPage only after a number of changes have occurred.
-        try _currentPage._nodes.append(createNode(with: newElement))
+        try _currentPage.appendNode(createNode(with: newElement))
         try _currentPage.store(using: _fileHandle) // store All
         totalCount += 1
     }
 //    @inlinable
     public func remove(at position: Index) throws {
         let node = try getNodeFor(index: position)
-        _currentPage._nodes.remove(at: indexRelativeToCurrent(position))
+        _currentPage.removeNode(at: indexRelativeToCurrentPage(position))
         // TODO: Move the old node+data for reuse.
         addNodeToFreePool(node)
         
@@ -323,12 +329,12 @@ extension FileHandle: StorageAccessor {
     func write<T: DataProtocol>(data: T) throws {
         try self.write(contentsOf: data)
     }
-    func read(from address: Address, upToCount: Address) throws -> Data? {
+    func read(from address: Address, upToCount: Int) throws -> Data? {
         try self.seek(toOffset: address)
-        return try self.read(upToCount: Int(upToCount))
+        return try self.read(upToCount: upToCount)
     }
-    func read(bytesCount: Address) throws -> Data? {
-        return try self.read(upToCount: Int(bytesCount))
+    func read(bytesCount: Int) throws -> Data? {
+        return try self.read(upToCount: bytesCount)
     }
     func seek(to address: Address) throws {
         try self.seek(toOffset: address)
