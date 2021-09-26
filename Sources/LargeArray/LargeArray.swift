@@ -89,7 +89,7 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
         }
     }
     ///
-    init?(path: String, maxPerPage: Index = 1024) {
+    public init?(path: String, maxPerPage: Index = 1024) {
         if FileManager.default.fileExists(atPath: path) == false {
             FileManager.default.createFile(atPath: path, contents: nil)
         }
@@ -221,28 +221,31 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
     
 //    @inlinable
     public subscript(position: Index) -> Data {
-//    public subscript<T: Decodable>(position: Index) -> T {
         get {
             do {
-                let node = try getNodeFor(index: position)
-                guard let nodeData = try _fileHandle.read(from: node.address, upToCount: node.used) else { throw LAErrors.ErrorReadingData }
-                return nodeData
+                return try autoreleasepool {
+                    let node = try getNodeFor(index: position)
+                    guard let nodeData = try _fileHandle.read(from: node.address, upToCount: node.used) else { throw LAErrors.ErrorReadingData }
+                    return nodeData
+                }
             } catch {
                 fatalError("\(error.localizedDescription) - Position: \(position)")
             }
         }
         set {
             do {
-                var node = try getNodeFor(index: position)
-                if node.reserved < newValue.count {
-                    // TODO: Move the old node+data for reuse.
-                    // Create a new node
-                    let newNode = try createNode(with: newValue)
-                    addNodeToFreePool(node)
-                    _currentPage.updateNode(at: indexRelativeToCurrentPage(position), node: newNode)
-                } else {
-                    node.used = newValue.count
-                    _currentPage.updateNode(at: indexRelativeToCurrentPage(position), node: node)
+                try autoreleasepool {
+                    var node = try getNodeFor(index: position)
+                    if node.reserved < newValue.count {
+                        // TODO: Move the old node+data for reuse.
+                        // Create a new node
+                        let newNode = try createNode(with: newValue)
+                        addNodeToFreePool(node)
+                        _currentPage.updateNode(at: indexRelativeToCurrentPage(position), node: newNode)
+                    } else {
+                        node.used = newValue.count
+                        _currentPage.updateNode(at: indexRelativeToCurrentPage(position), node: node)
+                    }
                 }
 //                try _currentPage.store(using: _fileHandle) // Store all ... perhaps later>???
             } catch {
@@ -253,25 +256,29 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
 //    @inlinable
 //    public /*mutating*/ func append<T:Codable>(_ newElement:T) throws {
     public /*mutating*/ func append(_ newElement: Data) throws {
-        if _currentPage.info._availableNodes >= _maxElementsPerPage {
-            try createNewCurrentPage()
+        try autoreleasepool {
+            if _currentPage.info._availableNodes >= _maxElementsPerPage {
+                try createNewCurrentPage()
+            }
+            
+            // update the IndexPage and store that too??? Or store the IndexPage only after a number of changes have occurred.
+            try _currentPage.appendNode(createNode(with: newElement))
+//            try _currentPage.store(using: _fileHandle) // store All ... perhaps later???
+            totalCount += 1
         }
-        
-        // update the IndexPage and store that too??? Or store the IndexPage only after a number of changes have occurred.
-        try _currentPage.appendNode(createNode(with: newElement))
-//        try _currentPage.store(using: _fileHandle) // store All ... perhaps later???
-        totalCount += 1
     }
 //    @inlinable
     public func remove(at position: Index) throws {
-        let node = try getNodeFor(index: position)
-        _currentPage.removeNode(at: indexRelativeToCurrentPage(position))
-        // TODO: Move the old node+data for reuse.
-        addNodeToFreePool(node)
-        
-//        try _currentPage.store(using: _fileHandle) // store All ... perhaps later???
-        totalCount -= 1
-        adjustCurrentPageIfRequired()
+        try autoreleasepool {
+            let node = try getNodeFor(index: position)
+            _currentPage.removeNode(at: indexRelativeToCurrentPage(position))
+            // TODO: Move the old node+data for reuse.
+            addNodeToFreePool(node)
+            
+//            try _currentPage.store(using: _fileHandle) // store All ... perhaps later???
+            totalCount -= 1
+            adjustCurrentPageIfRequired()
+        }
     }
 }
 @available(macOS 10.15.4, *)

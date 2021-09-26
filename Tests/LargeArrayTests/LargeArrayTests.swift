@@ -131,7 +131,7 @@ final class LargeArrayTests: XCTestCase {
             measure {
                 do {
                     for i in 0..<numElements {
-                        XCTAssertNoThrow( try la.append(Data(repeating: UInt8(i % 128), count: 10)))
+                        XCTAssertNoThrow( try la.append(Data(repeating: UInt8(i % 128), count: Int.random(in: 100..<2000))))
                     }
                 } catch {
                     XCTFail()
@@ -148,11 +148,17 @@ final class LargeArrayTests: XCTestCase {
             XCTAssertNotNil(la)
             guard let la = la else { return }
             for i in 0..<numElements {
-                try la.append(Data(repeating: UInt8(i % 128), count: 10))
+                try la.append(Data(repeating: UInt8(i % 128), count: Int.random(in: 100..<2000)))
             }
             print(la)
             measure {
-                for n in la { XCTAssertEqual(n.count, 10) }
+                for n in la {
+//                    XCTAssertTrue((10..<2000).contains(n.count))
+                    if (10..<2000).contains(n.count) == false {
+                        print("ERROR")
+                        break
+                    }
+                }
             }
 //            measure {
 //                la.forEach { XCTAssertEqual($0.count, 10) }

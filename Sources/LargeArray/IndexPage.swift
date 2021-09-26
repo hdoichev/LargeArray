@@ -101,8 +101,8 @@ extension IndexPage {
                     dest.copyBytes(from: source)
                 }
             }
-            _dirty.nodes = false
             try storageAccessor.write(data: nodesData)
+            _dirty.nodes = false
         }
     }
     ///
