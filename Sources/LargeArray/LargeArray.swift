@@ -135,8 +135,13 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
     func createNode(with data: Data) throws -> Node {
         // Store the data and create a node to point to it.
         let node = try Node(address: _fileHandle.seekToEnd(), used: data.count, reserved: data.count)
-        try _fileHandle.write(contentsOf: data)
+        try storeNodeData(node, contentsOf: data)
+//        try _fileHandle.write(contentsOf: data)
         return node
+    }
+    ///
+    func storeNodeData(_ node: Node, contentsOf data: Data) throws {
+        try _fileHandle.write(data, at: node.address)
     }
     ///
     /*mutating*/ func removeNode(at position: Index) {
@@ -153,8 +158,6 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
         try _currentPage.store(using: _fileHandle)
         // Last: Set the new page as the current page and update related properties.
         _currentPage_startIndex = _currentPage_startIndex + Index(_currentPage.info._availableNodes)
-//        print("CurrentPage: \(_currentPage)")
-//        print("NewPage: \(newPage)")
         _currentPage = newPage
     }
     ///
@@ -172,14 +175,19 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
         try _currentPage.store(using: _fileHandle)
         let traverseUp = (index < _currentPage_startIndex)
         while isItemIndexInCurrentPage(index: index) == false {
-            guard traverseUp == (index < _currentPage_startIndex) else { throw LAErrors.IndexMismatch }
+            if _currentPage.info._availableNodes > 0 {
+                if traverseUp != (index < _currentPage_startIndex) {
+                    throw LAErrors.IndexMismatch
+                }
+            }
+//            guard traverseUp == (index < _currentPage_startIndex) && (_currentPage.info._availableNodes > 0) else { throw LAErrors.IndexMismatch }
             let addressToLoad = traverseUp ? _currentPage.info._prev : _currentPage.info._next
             guard addressToLoad != 0 else {
                 throw LAErrors.CorruptedPageAddress
             }
+            if traverseUp == false { _currentPage_startIndex += _currentPage.info._availableNodes }
             try _currentPage.load(using: _fileHandle, from: addressToLoad, what: .Info)
-            traverseUp ? ( _currentPage_startIndex -= _currentPage.info._availableNodes ) :
-                         ( _currentPage_startIndex += _currentPage.info._availableNodes )
+            if traverseUp == true { _currentPage_startIndex -= _currentPage.info._availableNodes }
         }
         try _currentPage.load(using: _fileHandle, from: _currentPage.info._address, what: .Nodes)
     }
@@ -245,6 +253,7 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
                     } else {
                         node.used = newValue.count
                         _currentPage.updateNode(at: indexRelativeToCurrentPage(position), node: node)
+                        try storeNodeData(node, contentsOf: newValue)
                     }
                 }
 //                try _currentPage.store(using: _fileHandle) // Store all ... perhaps later>???
@@ -280,15 +289,24 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
             adjustCurrentPageIfRequired()
         }
     }
+    ///
+    public func removeSubrange(_ range: Range<Int>) throws {
+        // TODO: This can be optimized by removeing chunks of Nodes from each page rather than rather than going one at a time
+        try range.forEach { _ in try remove(at: range.startIndex) }
+    }
 }
+@available(macOS 10.15.4, *)
+extension LargeArray: Collection {
+}
+
 @available(macOS 10.15.4, *)
 extension LargeArray: CustomStringConvertible {
     public var description: String {
         """
-        \(LargeArray.self)
-        \(self._header)
-        currentPage_StartIndex: \(_currentPage_startIndex)
-        \(_currentPage)
+        \(LargeArray.self):
+            \(self._header)
+            currentPage_StartIndex: \(_currentPage_startIndex)
+            \(_currentPage)
         """
     }
 }

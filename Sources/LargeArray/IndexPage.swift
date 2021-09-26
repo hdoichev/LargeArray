@@ -70,7 +70,7 @@ struct IndexPage: Codable {
     }
     ///
     func isValidIndex(_ position: LargeArray.Index) -> Bool {
-        return (0..<_nodes.count).contains(position)
+        return (0..<_info._availableNodes).contains(position)
     }
 }
 @available(macOS 10.15.4, *)

@@ -142,7 +142,7 @@ final class LargeArrayTests: XCTestCase {
     }
     ///
     func testTraverseAllElementsInArrayPerformance() {
-        let numElements = 1024*1024
+        let numElements = 1024*100
         do {
             let la = LargeArray(path: file_path)
             XCTAssertNotNil(la)
@@ -163,6 +163,84 @@ final class LargeArrayTests: XCTestCase {
 //            measure {
 //                la.forEach { XCTAssertEqual($0.count, 10) }
 //            }
+        } catch {}
+    }
+    ///
+    func testRemoveElements_PageMid() {
+        let numElements = 1024*3
+        do {
+            let la = LargeArray(path: file_path)
+            XCTAssertNotNil(la)
+            guard let la = la else { return }
+            for i in 0..<numElements { try la.append(Data(repeating: 1, count: 100)) }
+            la[1024] = Data(repeating: 2, count: 100)
+            for i in 1024..<2048 { la[i] = Data(repeating: 2, count: 100) }
+            print(la)
+            la[1024].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 2) } }
+            // remove all elements from the second pate
+            XCTAssertNoThrow(try la.removeSubrange(1024..<2048))
+            la[1024].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } }
+            la[0].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } }
+            la.forEach { d in d.withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } } }
+            print(la)
+        } catch {}
+    }
+    func testRemoveElements_PageLast() {
+        let numElements = 1024*3
+        do {
+            let la = LargeArray(path: file_path)
+            XCTAssertNotNil(la)
+            guard let la = la else { return }
+            for i in 0..<numElements { try la.append(Data(repeating: 1, count: 100)) }
+            la[2048] = Data(repeating: 2, count: 100)
+            for i in 2048..<3072 { la[i] = Data(repeating: 2, count: 100) }
+            print(la)
+            la[2048].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 2) } }
+            // remove all elements from the second pate
+            XCTAssertNoThrow(try la.removeSubrange(2048..<3072))
+            la[1024].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } }
+            la[0].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } }
+            la.forEach { d in d.withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } } }
+            print(la)
+        } catch {}
+    }
+    func testRemoveElements_PageFirst() {
+        let numElements = 1024*3
+        do {
+            let la = LargeArray(path: file_path)
+            XCTAssertNotNil(la)
+            guard let la = la else { return }
+            for i in 0..<numElements { try la.append(Data(repeating: 1, count: 100)) }
+            la[0] = Data(repeating: 2, count: 100)
+            for i in 0..<1024 { la[i] = Data(repeating: 2, count: 100) }
+            print(la)
+            la[0].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 2) } }
+            // remove all elements from the second pate
+            XCTAssertNoThrow(try la.removeSubrange(0..<1024))
+            la[1024].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } }
+            la[0].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } }
+            la.forEach { d in d.withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } } }
+            print(la)
+        } catch {}
+    }
+    func testRemoveElements_PagePartial() {
+        do {
+            let la = LargeArray(path: file_path)
+            XCTAssertNotNil(la)
+            guard let la = la else { return }
+            for i in 1..<4 {
+                for _ in 0..<1024 { try la.append(Data(repeating: UInt8(i), count: 100)) }
+            }
+            print(la)
+            XCTAssertNoThrow(try la.removeSubrange(2048+100..<3072)) // remove elements from the third page
+            XCTAssertNoThrow(try la.removeSubrange(1024+100..<2048)) // remove elements from the second page
+            XCTAssertNoThrow(try la.removeSubrange(0+100..<1024)) // remove elements from the first page
+            
+            for i in 0..<100 { la[i].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } } }
+            for i in 100..<200 { la[i].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 2) } } }
+            for i in 200..<300 { la[i].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 3) } } }
+
+            print(la)
         } catch {}
     }
     ///
