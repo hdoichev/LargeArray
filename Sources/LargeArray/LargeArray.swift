@@ -15,6 +15,7 @@ enum LAErrors: Error {
     case InvalidFileVersion
     case IndexMismatch
     case CorruptedPageAddress
+    case NodeIsFull
 }
 
 typealias Address = UInt64
@@ -143,12 +144,13 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
     func storeNodeData(_ node: Node, contentsOf data: Data) throws {
         try _fileHandle.write(data, at: node.address)
     }
-    ///
-    /*mutating*/ func removeNode(at position: Index) {
-        
+    func getNodeData(_ node: Node) throws -> Data {
+        guard let nodeData = try _fileHandle.read(from: node.address, upToCount: node.used) else { throw LAErrors.ErrorReadingData }
+        return nodeData
     }
     ///
-    /*mutating*/ func createNewCurrentPage() throws {
+    /*mutating*/
+    func createNewCurrentPage() throws {
         var newPage = IndexPage(address: _fileHandle.seekToEndOfFile(), maxNodes: _maxElementsPerPage)
         newPage.info._prev = _currentPage.info._address
         // First: Store the new page, thus when the current_page.next is updated it will point to a properly stored data.
@@ -161,6 +163,25 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
         _currentPage = newPage
     }
     ///
+    func splitCurrentPage() throws {
+        var newPage = IndexPage(address: _fileHandle.seekToEndOfFile(), maxNodes: _maxElementsPerPage)
+        newPage.info._prev = _currentPage.info._address
+        newPage.info._next = _currentPage.info._next
+        // Update the _curPage.info._next page to point to the newPage.
+        if _currentPage.info._next > 0 {
+            var pageToUpdate = IndexPage(address: _currentPage.info._next, maxNodes: _maxElementsPerPage)
+            try pageToUpdate.load(using: _fileHandle, from: _currentPage.info._next, what: .Info)
+            pageToUpdate.info._prev = newPage.info._address
+            try pageToUpdate.store(using: _fileHandle)
+        }
+        // now, link the current page with the split (new) page
+        _currentPage.info._next = newPage.info._address
+        // Move half of the nodes to the new page and save it
+        try _currentPage.moveNodes(_currentPage.info._availableNodes/2..<_currentPage.info._availableNodes, into: &newPage)
+        try newPage.store(using: _fileHandle)
+        try _currentPage.store(using: _fileHandle)
+    }
+    ///
     @inlinable
     func indexRelativeToCurrentPage(_ index: Index) -> Index {
         return index - _currentPage_startIndex
@@ -170,7 +191,8 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
         return _currentPage.isValidIndex(indexRelativeToCurrentPage(index))
     }
     ///
-    /*mutating*/ func loadPageFor(index: Index) throws {
+    /*mutating*/
+    func loadPageFor(index: Index) throws {
         guard isItemIndexInCurrentPage(index: index) == false else { return }
         try _currentPage.store(using: _fileHandle)
         let traverseUp = (index < _currentPage_startIndex)
@@ -192,7 +214,8 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
         try _currentPage.load(using: _fileHandle, from: _currentPage.info._address, what: .Nodes)
     }
     ///
-    /*mutating*/ func getNodeFor(index: Index) throws -> Node {
+    /*mutating*/
+    func getNodeFor(index: Index) throws -> Node {
         try loadPageFor(index: index)
         return _currentPage.node(at: indexRelativeToCurrentPage(index))
     }
@@ -232,9 +255,7 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
         get {
             do {
                 return try autoreleasepool {
-                    let node = try getNodeFor(index: position)
-                    guard let nodeData = try _fileHandle.read(from: node.address, upToCount: node.used) else { throw LAErrors.ErrorReadingData }
-                    return nodeData
+                    return try getNodeData(getNodeFor(index: position))
                 }
             } catch {
                 fatalError("\(error.localizedDescription) - Position: \(position)")
@@ -263,15 +284,14 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
         }
     }
 //    @inlinable
-//    public /*mutating*/ func append<T:Codable>(_ newElement:T) throws {
-    public /*mutating*/ func append(_ newElement: Data) throws {
+    public /*mutating*/ func append(_ element: Data) throws {
         try autoreleasepool {
-            if _currentPage.info._availableNodes >= _maxElementsPerPage {
+            if _currentPage.isFull {
                 try createNewCurrentPage()
             }
             
             // update the IndexPage and store that too??? Or store the IndexPage only after a number of changes have occurred.
-            try _currentPage.appendNode(createNode(with: newElement))
+            try _currentPage.appendNode(createNode(with: element))
 //            try _currentPage.store(using: _fileHandle) // store All ... perhaps later???
             totalCount += 1
         }
@@ -293,6 +313,22 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
     public func removeSubrange(_ range: Range<Int>) throws {
         // TODO: This can be optimized by removeing chunks of Nodes from each page rather than rather than going one at a time
         try range.forEach { _ in try remove(at: range.startIndex) }
+    }
+    ///
+    public func insert(_ element: Element, at position: Index) throws {
+        try autoreleasepool {
+            // Find in which page the Element should be inserted.
+            // If the pate is full - then split it in a half (creating two linked pages) and insert the new
+            // element into one of those pages.
+            try loadPageFor(index: position)
+            if _currentPage.isFull {
+                // Split into two pages and then insert the item into one of them.
+                try splitCurrentPage()
+                try loadPageFor(index: position)
+            }
+            try _currentPage.insertNode(createNode(with: element), at: indexRelativeToCurrentPage(position))
+            totalCount += 1
+        }
     }
 }
 @available(macOS 10.15.4, *)
@@ -376,6 +412,7 @@ extension LAErrors: CustomStringConvertible {
         case .InvalidAddressInIndexPage: return "InvalidAddressInIndexPage"
         case .InvalidFileVersion: return "InvalidFileVersion"
         case .NilBaseAddress: return "NilBaseAddress"
+        case .NodeIsFull: return "NodeIsFull"
         }
     }
 }

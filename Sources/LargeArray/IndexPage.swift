@@ -37,6 +37,9 @@ struct IndexPage: Codable {
     var dirty: Dirty {
         _dirty
     }
+    var isFull: Bool {
+        return _info._availableNodes >= _info._maxNodes 
+    }
     
     private var _info: Info
     private var _nodes: ContiguousArray<Node>
@@ -48,9 +51,17 @@ struct IndexPage: Codable {
         _dirty = Dirty(info: true, nodes: true)
     }
     ///
-    mutating func appendNode(_ node: Node) {
+    mutating func appendNode(_ node: Node) throws {
+        guard isFull == false else { throw LAErrors.NodeIsFull }
         _dirty.nodes = true
         _nodes.append(node)
+        info._availableNodes += 1
+    }
+    ///
+    mutating func insertNode(_ node: Node, at position: LargeArray.Index) throws {
+        guard isFull == false else { throw LAErrors.NodeIsFull }
+        _dirty.nodes = true
+        _nodes.insert(node, at: position)
         info._availableNodes += 1
     }
     ///
@@ -67,6 +78,15 @@ struct IndexPage: Codable {
     ///
     func node(at position: LargeArray.Index) -> Node {
         return _nodes[position]
+    }
+    ///
+    mutating func moveNodes(_ range: Range<Int>, into page: inout IndexPage) throws {
+        for i in range {
+            try page.appendNode(node(at: i))
+        }
+        _nodes.removeSubrange(range)
+        _info._availableNodes = _nodes.count
+        _dirty.nodes = true
     }
     ///
     func isValidIndex(_ position: LargeArray.Index) -> Bool {
@@ -114,6 +134,7 @@ extension IndexPage {
             self._info = in_buffer[0]
         }
         guard self._info._address == address else { throw LAErrors.InvalidAddressInIndexPage }
+        _dirty.info = false
     }
     ///
     mutating func _loadNodes(using storageAccessor: StorageAccessor, from address: Address?) throws {
@@ -126,6 +147,7 @@ extension IndexPage {
         guard nodesSize == nodesData.count else { throw LAErrors.InvalidReadBufferSize }
         _nodes = ContiguousArray<Node>(repeating: Node(), count: Int(_info._availableNodes))
         _nodes.withUnsafeMutableBufferPointer { nodesData.copyBytes(to: $0) }
+        _dirty.nodes = false
     }
     ///
     mutating func load(using storageAccessor: StorageAccessor, from address: Address, what: Properties = .All) throws {
@@ -135,6 +157,8 @@ extension IndexPage {
             try _loadNodes(using: storageAccessor, from: nil) // the Storage should already be positioned at the start of the Nodes section so seek is not needed.
         case .Info:
             try _loadInfo(using: storageAccessor, from: address)
+            // after loading the info the nodes can't be marked as dirty
+            _dirty.nodes = false
         case .Nodes:
             try _loadNodes(using: storageAccessor, from: address)
         }

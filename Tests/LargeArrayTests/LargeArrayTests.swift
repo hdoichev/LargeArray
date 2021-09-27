@@ -243,6 +243,25 @@ final class LargeArrayTests: XCTestCase {
             print(la)
         } catch {}
     }
+    //
+    func testInsertElement_PageSplit() {
+        do {
+            let la = LargeArray(path: file_path)
+            XCTAssertNotNil(la)
+            guard let la = la else { return }
+            for i in 1..<3 {
+                for _ in 0..<1024 { try la.append(Data(repeating: UInt8(i), count: 100)) }
+            }
+            print(la)
+            try la.insert(Data(repeating: 4, count: 100), at: 1024)
+            la[1024].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 4) } }
+            try la.insert(Data(repeating: 3, count: 100), at: 1023)
+            la[1023].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 3) } }
+            print(la)
+        } catch {
+            XCTFail()
+        }
+    }
     ///
     func testStoreLoadNode() {
         var node = Node()
