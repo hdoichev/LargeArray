@@ -93,6 +93,7 @@ struct IndexPage: Codable {
         return (0..<_info._availableNodes).contains(position)
     }
 }
+
 @available(macOS 10.15.4, *)
 extension IndexPage {
     ///

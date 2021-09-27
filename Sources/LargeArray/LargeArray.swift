@@ -6,18 +6,6 @@
 //
 import Foundation
 
-enum LAErrors: Error {
-    case InvalidReadBufferSize
-    case InvalidWriteBufferSize
-    case NilBaseAddress
-    case ErrorReadingData
-    case InvalidAddressInIndexPage
-    case InvalidFileVersion
-    case IndexMismatch
-    case CorruptedPageAddress
-    case NodeIsFull
-}
-
 typealias Address = UInt64
 
 ///
@@ -30,38 +18,17 @@ protocol StorageAccessor {
 }
 
 ///
-public let _LA_VERSION: Int = 1
-struct Header: Codable {
-    let _version: Int
-    var _count: Int /// Total number of lelements in the Array
-}
-///
-struct Node: Codable {
-    var address: Address = 0
-    var used: Int = 0
-    var reserved: Int = 0
-}
-
-///
 ///  LargeArray structure:
 ///   Header:
-///     Version: Int
-///     Count: Int  // the number of elements in the array
-///     MaxNodesPerPage: Int // The number of node per page. This help calculate the page size.
 ///   IndexPage:
 ///     Info:
-///         address: Address - the address of the page
-///         _availableNodes: LargeArray.Index - how many nodes are stored in this page
-///         _maxNodes: LargeArray.Index - maximum nodes per page
-///         _next: Address - next node, if any
-///         _prev: Address - previous node, if any
 ///     nodes: ContiguousArray<Node>
 ///     --- The Nodes are stored immediately after the IndexPage.Info information ---
 ///
 ///    ... the rest is a mixture of Objects data (which is pointed to by the Nodes) and additional IndexPages
 ///
 ///  Node:
-///     address: UInt64
+///     address: Address
 ///     used: Int
 ///     reserved: Int
 ///
@@ -100,7 +67,7 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
             return nil
         }
         //
-        _header = Header(_version: _LA_VERSION, _count: 0)
+        _header = Header()
         _maxElementsPerPage = maxPerPage
         let rootPageaddress: Address = Address(MemoryLayout<Header>.size)
         _currentPage = IndexPage(address: rootPageaddress, maxNodes: _maxElementsPerPage)
@@ -221,7 +188,9 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
     }
     ///
     func addNodeToFreePool(_ node: Node) {
-        
+        if _header._startFreeAddress == 0 {
+//            _freeNodes = LargeArray()
+        }
     }
     /// When nodes are removed the current page can become empty and perhaps a page with some data should be loaded. Perhaps not?!?!?
     func adjustCurrentPageIfRequired() {
@@ -347,36 +316,9 @@ extension LargeArray: CustomStringConvertible {
     }
 }
 ///
-extension Header: CustomStringConvertible {
-    var description: String {
-        "\(Header.self): version: \(_version), count: \(_count)"
-    }
-}
-///
 extension MemoryLayout {
     static var description: String {
         "\(T.self) : \(MemoryLayout<T>.size), \(MemoryLayout<T>.alignment), \(MemoryLayout<T>.stride)"
-    }
-}
-
-extension Node {
-    func dump() {
-        print("Address = \(self.address), Used = \(self.used), Reserved = \(self.reserved)")
-    }
-}
-
-extension Node: Equatable {
-    static func == (lhs: Node, rhs: Node) -> Bool {
-        return
-            (lhs.address == rhs.address &&
-            lhs.used == rhs.used &&
-            lhs.reserved == rhs.reserved)
-    }
-}
-
-extension Node: CustomStringConvertible {
-    var description: String {
-        "Node(address: \(address), used: \(used), reserved: \(reserved))"
     }
 }
 
@@ -398,21 +340,5 @@ extension FileHandle: StorageAccessor {
     }
     func seek(to address: Address) throws {
         try self.seek(toOffset: address)
-    }
-}
-
-extension LAErrors: CustomStringConvertible {
-    var description: String {
-        switch self {
-        case .ErrorReadingData: return "ErrorRadingData"
-        case .InvalidWriteBufferSize: return "InvalidWriteBufferSize"
-        case .InvalidReadBufferSize: return "InvalidReadBufferSize"
-        case .CorruptedPageAddress: return "CorruptedPageAddress"
-        case .IndexMismatch: return "IndexMismatch"
-        case .InvalidAddressInIndexPage: return "InvalidAddressInIndexPage"
-        case .InvalidFileVersion: return "InvalidFileVersion"
-        case .NilBaseAddress: return "NilBaseAddress"
-        case .NodeIsFull: return "NodeIsFull"
-        }
     }
 }
