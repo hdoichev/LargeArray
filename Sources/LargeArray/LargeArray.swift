@@ -150,22 +150,22 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
     }
     ///
     @inlinable
-    func indexRelativeToCurrentPage(_ index: Index) -> Index {
-        return index - _currentPage_startIndex
+    func indexRelativeToCurrentPage(_ position: Index) -> Index {
+        return position - _currentPage_startIndex
     }
     ///
-    func isItemIndexInCurrentPage(index: Index) -> Bool {
-        return _currentPage.isValidIndex(indexRelativeToCurrentPage(index))
+    func isItemInCurrentPage(at position: Index) -> Bool {
+        return _currentPage.isValidIndex(indexRelativeToCurrentPage(position))
     }
     ///
     /*mutating*/
-    func loadPageFor(index: Index) throws {
-        guard isItemIndexInCurrentPage(index: index) == false else { return }
+    func loadPageFor(position: Index) throws {
+        guard isItemInCurrentPage(at: position) == false else { return }
         try _currentPage.store(using: _fileHandle)
-        let traverseUp = (index < _currentPage_startIndex)
-        while isItemIndexInCurrentPage(index: index) == false {
+        let traverseUp = (position < _currentPage_startIndex)
+        while isItemInCurrentPage(at: position) == false {
             if _currentPage.info._availableNodes > 0 {
-                if traverseUp != (index < _currentPage_startIndex) {
+                if traverseUp != (position < _currentPage_startIndex) {
                     throw LAErrors.IndexMismatch
                 }
             }
@@ -182,9 +182,9 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
     }
     ///
     /*mutating*/
-    func getNodeFor(index: Index) throws -> Node {
-        try loadPageFor(index: index)
-        return _currentPage.node(at: indexRelativeToCurrentPage(index))
+    func getNodeFor(position: Index) throws -> Node {
+        try loadPageFor(position: position)
+        return _currentPage.node(at: indexRelativeToCurrentPage(position))
     }
     ///
     func addNodeToFreePool(_ node: Node) {
@@ -224,7 +224,7 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
         get {
             do {
                 return try autoreleasepool {
-                    return try getNodeData(getNodeFor(index: position))
+                    return try getNodeData(getNodeFor(position: position))
                 }
             } catch {
                 fatalError("\(error.localizedDescription) - Position: \(position)")
@@ -233,7 +233,7 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
         set {
             do {
                 try autoreleasepool {
-                    var node = try getNodeFor(index: position)
+                    var node = try getNodeFor(position: position)
                     if node.reserved < newValue.count {
                         // TODO: Move the old node+data for reuse.
                         // Create a new node
@@ -268,7 +268,7 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
 //    @inlinable
     public func remove(at position: Index) throws {
         try autoreleasepool {
-            let node = try getNodeFor(index: position)
+            let node = try getNodeFor(position: position)
             _currentPage.removeNode(at: indexRelativeToCurrentPage(position))
             // TODO: Move the old node+data for reuse.
             addNodeToFreePool(node)
@@ -289,11 +289,11 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
             // Find in which page the Element should be inserted.
             // If the pate is full - then split it in a half (creating two linked pages) and insert the new
             // element into one of those pages.
-            try loadPageFor(index: position)
+            try loadPageFor(position: position)
             if _currentPage.isFull {
                 // Split into two pages and then insert the item into one of them.
                 try splitCurrentPage()
-                try loadPageFor(index: position)
+                try loadPageFor(position: position)
             }
             try _currentPage.insertNode(createNode(with: element), at: indexRelativeToCurrentPage(position))
             totalCount += 1

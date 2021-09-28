@@ -104,7 +104,7 @@ final class LargeArrayTests: XCTestCase {
 //                la._currentPage._nodes[i].dump()
 //            }
             for i in stride(from: 0, to: numElements, by: 100) {
-                let node = try la.getNodeFor(index: i)
+                let node = try la.getNodeFor(position: i)
 //                print("Index: \(i): \(node), \(la._currentPage)")
                 print("Index: \(i): \(node)")
             }
