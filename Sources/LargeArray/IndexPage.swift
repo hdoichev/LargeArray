@@ -9,23 +9,26 @@ import Foundation
 
 ///
 @available(macOS 10.15.4, *)
+public struct PageInfo: Codable {
+    let _address: Address
+    var _availableNodes: LargeArray.Index
+    var _maxNodes: LargeArray.Index
+    var _next: Address
+    var _prev: Address
+}
+
+///
+@available(macOS 10.15.4, *)
 struct IndexPage: Codable {
     enum Properties {
         case All, Info, Nodes
-    }
-    struct Info: Codable {
-        let _address: Address
-        var _availableNodes: LargeArray.Index
-        var _maxNodes: LargeArray.Index
-        var _next: Address
-        var _prev: Address
     }
     struct Dirty: Codable {
         var info: Bool = false
         var nodes: Bool = false
         var isDirty: Bool { info || nodes }
     }
-    var info: Info {
+    var info: PageInfo {
         get { return _info }
         set {
             if _info != newValue {
@@ -41,12 +44,12 @@ struct IndexPage: Codable {
         return _info._availableNodes >= _info._maxNodes 
     }
     
-    private var _info: Info
+    private var _info: PageInfo
     private var _nodes: ContiguousArray<Node>
     private var _dirty: Dirty
     ///
     init(address: Address, maxNodes: LargeArray.Index) {
-        _info = Info(_address: address, _availableNodes: 0, _maxNodes: maxNodes, _next: Address.invalid, _prev: Address.invalid)
+        _info = PageInfo(_address: address, _availableNodes: 0, _maxNodes: maxNodes, _next: Address.invalid, _prev: Address.invalid)
         _nodes = ContiguousArray<Node>()
         _dirty = Dirty(info: true, nodes: true)
     }
@@ -101,15 +104,15 @@ extension IndexPage {
         guard _dirty.isDirty else { return }
         if _dirty.info {
             _info._availableNodes = _nodes.count // preserve the count of the actual nodes, so we can properly load the nodes data
-            var data = Data(count: MemoryLayout<Info>.size)
+            var data = Data(count: MemoryLayout<PageInfo>.size)
             data.withUnsafeMutableBytes { buffer in
-                let out_buffer = buffer.bindMemory(to: Info.self)
+                let out_buffer = buffer.bindMemory(to: PageInfo.self)
                 out_buffer[0] = _info
             }
             try storageAccessor.write(data, at: _info._address)
             _dirty.info = false
         } else {
-            try storageAccessor.seek(to: _info._address + Address(MemoryLayout<Info>.size))
+            try storageAccessor.seek(to: _info._address + Address(MemoryLayout<PageInfo>.size))
         }
         // Store the nodes into the data buffer
         // When storing we always store the _maxNodes size. This prevents the relocation of the IndexPage when elements are added/removed from it.
@@ -128,12 +131,8 @@ extension IndexPage {
     }
     ///
     mutating func _loadInfo(using storageAccessor: StorageAccessor, from address: Address) throws {
-        guard let data = try storageAccessor.read(from: address, upToCount: MemoryLayout<IndexPage.Info>.size) else { throw LAErrors.ErrorReadingData }
-        try data.withUnsafeBytes { buffer in
-            let in_buffer = buffer.bindMemory(to: IndexPage.Info.self)
-            guard in_buffer.count == 1 else { throw LAErrors.InvalidReadBufferSize }
-            self._info = in_buffer[0]
-        }
+        guard let data = try storageAccessor.read(from: address, upToCount: MemoryLayout<PageInfo>.size) else { throw LAErrors.ErrorReadingData }
+        try _load(into: &self.info, from: data)
         guard self._info._address == address else { throw LAErrors.InvalidAddressInIndexPage }
         _dirty.info = false
     }
@@ -141,7 +140,7 @@ extension IndexPage {
     mutating func _loadNodes(using storageAccessor: StorageAccessor, from address: Address?) throws {
         guard _info._availableNodes > 0 else { _nodes.removeAll(); return }
         if let address = address {
-            try storageAccessor.seek(to: address + Address(MemoryLayout<IndexPage.Info>.size))
+            try storageAccessor.seek(to: address + Address(MemoryLayout<PageInfo>.size))
         }
         let nodesSize = MemoryLayout<Node>.size * _info._availableNodes
         guard let nodesData = try storageAccessor.read(bytesCount: nodesSize) else { throw LAErrors.ErrorReadingData }
@@ -176,7 +175,7 @@ extension IndexPage: CustomStringConvertible {
 }
 
 @available(macOS 10.15.4, *)
-extension IndexPage.Info: Equatable {
+extension PageInfo: Equatable {
 //    static func == (lhs: IndexPage.Info, rhs: IndexPage.Info) -> Bool {
 //        return
 //        (lhs._address == rhs._address &&
@@ -185,6 +184,16 @@ extension IndexPage.Info: Equatable {
 //         lhs._next == rhs._next &&
 //         lhs._prev == rhs._prev)
 //    }
+}
+
+@available(macOS 10.15.4, *)
+extension PageInfo{
+    static func load(from storageAccessor: StorageAccessor, at address: Address) throws -> PageInfo {
+        guard let data = try storageAccessor.read(from: address, upToCount: MemoryLayout<PageInfo>.size) else { throw LAErrors.ErrorReadingData }
+        var info = PageInfo(_address: Address.invalid, _availableNodes: 0, _maxNodes: 0, _next: Address.invalid, _prev: Address.invalid)
+        try _load(into: &info, from: data)
+        return info
+    }
 }
 
 extension Address {

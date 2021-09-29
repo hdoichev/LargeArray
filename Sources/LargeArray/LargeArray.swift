@@ -258,6 +258,7 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
     /// When nodes are removed the current page can become empty and perhaps a page with some data should be loaded. Perhaps not?!?!?
     func adjustCurrentPageIfRequired() throws {
         if _header._count  == 0 {
+            try _currentPage.store(using: _fileHandle)
             guard _currentPage_startIndex == 0 else { throw LAErrors.CorruptedStartIndex}
             try _currentPage.load(using: _fileHandle, from: _header._startPageAddress)
             return
@@ -290,6 +291,20 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
     }
 }
 
+@available(macOS 10.15.4, *)
+extension LargeArray {
+    public func indexPagesInfo() throws -> [PageInfo] {
+        try _currentPage.store(using: _fileHandle) // ensure it is stored.
+        var infos = [PageInfo]()
+        var page = try PageInfo.load(from: _fileHandle, at: _header._startPageAddress)
+        page._next = _header._startPageAddress // bootstrap the first page to start loading
+        while page._next != Address.invalid {
+            page = try PageInfo.load(from: _fileHandle, at: page._next)
+            infos.append(page)
+        }
+        return infos
+    }
+}
 
 @available(macOS 10.15.4, *)
 extension LargeArray: MutableCollection, RandomAccessCollection {
@@ -374,7 +389,7 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
             try findPageForInsertion(position: position)
             if _currentPage.isFull {
                 // Split into two pages and then insert the item into one of them.
-                try splitCurrentPage()
+                try provideSpaceInCurrentPage()
                 try findPageForInsertion(position: position)
             }
             try _currentPage.insertNode(createNode(with: element), at: indexRelativeToCurrentPage(position))

@@ -109,7 +109,7 @@ final class LargeArrayTests: XCTestCase {
             for i in stride(from: 0, to: numElements, by: 100) {
                 let node = try la.getNodeFor(position: i)
 //                print("Index: \(i): \(node), \(la._currentPage)")
-                print("Index: \(i): \(node)")
+                print("Position: \(i): \(node)")
             }
             
             for n in la { XCTAssertEqual(n.count, 10) }
@@ -163,9 +163,9 @@ final class LargeArrayTests: XCTestCase {
                     }
                 }
             }
-//            measure {
-//                la.forEach { XCTAssertEqual($0.count, 10) }
-//            }
+            for (k,v) in try la.indexPagesInfo().enumerated() {
+                print(k, v)
+            }
         } catch {}
     }
     ///
@@ -186,6 +186,9 @@ final class LargeArrayTests: XCTestCase {
             la[0].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } }
             la.forEach { d in d.withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } } }
             print(la)
+            for (k,v) in try la.indexPagesInfo().enumerated() {
+                print(k, v)
+            }
         } catch {}
     }
     func testRemoveElements_PageLast() {
@@ -205,6 +208,9 @@ final class LargeArrayTests: XCTestCase {
             la[0].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } }
             la.forEach { d in d.withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } } }
             print(la)
+            for (k,v) in try la.indexPagesInfo().enumerated() {
+                print(k, v)
+            }
         } catch {}
     }
     func testRemoveElements_PageFirst() {
@@ -224,6 +230,9 @@ final class LargeArrayTests: XCTestCase {
             la[0].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } }
             la.forEach { d in d.withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } } }
             print(la)
+            for (k,v) in try la.indexPagesInfo().enumerated() {
+                print(k, v)
+            }
         } catch {}
     }
     func testRemoveElements_PagePartial() {
@@ -258,6 +267,10 @@ final class LargeArrayTests: XCTestCase {
                 }
                 print("Used count: \(la2.totalUsedBytesCount), Free count: \(la2.totalFreeBytesCount)")
             }
+            //
+            for (k,v) in try la.indexPagesInfo().enumerated() {
+                print(k, v)
+            }
         } catch {}
     }
     ///
@@ -280,6 +293,9 @@ final class LargeArrayTests: XCTestCase {
 //            try la.insert(Data(repeating: 1, count: elementSize), at: 0)
             try la.append(Data(repeating: 1, count: elementSize))
             print(la)
+            for (k,v) in try la.indexPagesInfo().enumerated() {
+                print(k, v)
+            }
         } catch {}
     }
     ///
@@ -297,6 +313,9 @@ final class LargeArrayTests: XCTestCase {
             try la.insert(Data(repeating: 3, count: 100), at: 1023)
             la[1023].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 3) } }
             print(la)
+            for (k,v) in try la.indexPagesInfo().enumerated() {
+                print(k, v)
+            }
         } catch {
             XCTFail()
         }
@@ -306,7 +325,7 @@ final class LargeArrayTests: XCTestCase {
         var node = Node()
         var node2 = Node()
         var data = Data(repeating: 0, count: MemoryLayout<Node>.size)
-        print("Info size: \(MemoryLayout<IndexPage.Info>.size)")
+        print("Info size: \(MemoryLayout<PageInfo>.size)")
         print("Header size: \(MemoryLayout<Header>.size)")
         print("Node size: \(MemoryLayout<Node>.size)")
         do {
