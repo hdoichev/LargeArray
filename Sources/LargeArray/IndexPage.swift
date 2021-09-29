@@ -46,7 +46,7 @@ struct IndexPage: Codable {
     private var _dirty: Dirty
     ///
     init(address: Address, maxNodes: LargeArray.Index) {
-        _info = Info(_address: address, _availableNodes: 0, _maxNodes: maxNodes, _next: 0, _prev: 0)
+        _info = Info(_address: address, _availableNodes: 0, _maxNodes: maxNodes, _next: Address.invalid, _prev: Address.invalid)
         _nodes = ContiguousArray<Node>()
         _dirty = Dirty(info: true, nodes: true)
     }
@@ -185,4 +185,8 @@ extension IndexPage.Info: Equatable {
 //         lhs._next == rhs._next &&
 //         lhs._prev == rhs._prev)
 //    }
+}
+
+extension Address {
+    static var invalid: Address { return Address.max }
 }

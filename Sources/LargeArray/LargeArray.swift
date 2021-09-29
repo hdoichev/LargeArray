@@ -6,7 +6,7 @@
 //
 import Foundation
 
-typealias Address = UInt64
+public typealias Address = UInt64
 
 ///
 protocol StorageAccessor {
@@ -37,8 +37,8 @@ protocol StorageAccessor {
 public class LargeArray /*: MutableCollection, RandomAccessCollection */{
     public typealias Element = Data
     public typealias Index = Int /// TODO: Change this UInt64
-//    public typealias Address = UInt64
-    
+
+    let _rootAddress: Address
     var _header: Header
     let _maxElementsPerPage: Index
     var _currentPage: IndexPage
@@ -46,6 +46,10 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
     var _currentPage_startIndex: Index
     ///
     var _fileHandle: FileHandle
+    ///
+    enum WalkDirection: Int {
+        case Up, Down
+    }
     ///
     private var totalCount: Index {
         get {
@@ -56,48 +60,78 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
             _header._count = newValue
         }
     }
+    private var totalUsedCount: Address {
+        get {
+            return _header._totalUsedBytesCount
+        }
+        set {
+//            if newValue < 0 { }
+            _header._totalUsedBytesCount = newValue
+        }
+    }
     ///
-    public init?(path: String, maxPerPage: Index = 1024) {
+    public var totalUsedBytesCount: Address {
+        return _header._totalUsedBytesCount
+    }
+    ///
+    init(start root: Address, maxPerPage: Index, fileHandle: FileHandle) throws {
+        _rootAddress = root
+        _header = Header()
+        _currentPage_startIndex = 0
+        _fileHandle = fileHandle
+        _maxElementsPerPage = maxPerPage
+
+        let rootPageAddress: Address = root + Address(MemoryLayout<Header>.size)
+        _currentPage = IndexPage(address: rootPageAddress, maxNodes: _maxElementsPerPage)
+        _currentPage_startIndex = 0
+        
+        // Read header if possible. If error, throw
+        do {
+            try _load(into: &_header, from: _fileHandle.read(from: root, upToCount: MemoryLayout<Header>.size) ?? Data())
+            try _currentPage.load(using: _fileHandle, from: rootPageAddress)
+            guard _header._startPageAddress == _currentPage.info._address else { throw LAErrors.CorruptedPageAddress }
+            // TODO: Better verification that the data is correct
+            return
+        } catch {
+            // If the file had data and we ended up here then we bailout.
+            // Don't override the contents of the file. Continue only if storing data at the 'end' of the file.
+            // TODO: Is this check good enough???
+            guard try _fileHandle.seekToEnd() == root else { throw error }
+            _header._startPageAddress = _currentPage.info._address
+        }
+        // if we read this from storage and the version is wrong - throw
+        // TODO: Better validation???
+        guard _header._version <= _LA_VERSION else { throw LAErrors.InvalidFileVersion }
+        try storeHeader()
+        try _currentPage.store(using: _fileHandle)
+    }
+    ///
+    public convenience init?(path: String, maxPerPage: Index = 1024) {
         if FileManager.default.fileExists(atPath: path) == false {
             FileManager.default.createFile(atPath: path, contents: nil)
         }
         if let fh = FileHandle(forUpdatingAtPath: path) {
-            _fileHandle = fh
+            do {
+                try self.init(start: 0, maxPerPage: maxPerPage, fileHandle: fh)
+            } catch {
+                return nil
+            }
         } else {
             return nil
         }
-        //
-        _header = Header()
-        _maxElementsPerPage = maxPerPage
-        let rootPageaddress: Address = Address(MemoryLayout<Header>.size)
-        _currentPage = IndexPage(address: rootPageaddress, maxNodes: _maxElementsPerPage)
-        _currentPage_startIndex = 0
-        
-        let fileSize = _fileHandle.seekToEndOfFile()
-        if fileSize > MemoryLayout<Header>.size {
-            do {
-                // try to initialize from the file
-                try _fileHandle.seek(toOffset: 0)
-                // Header
-                let headerData = _fileHandle.readData(ofLength: MemoryLayout<Header>.size)
-                try _load(into: &_header, from: headerData)
-                guard _header._version <= _LA_VERSION else { throw LAErrors.InvalidFileVersion }
-                try _currentPage.load(using: _fileHandle, from: rootPageaddress)
-            } catch {
-                // Log Error
-                return nil
-            }
-        } else {
-            // store initial state to file
-            do {
-                try _fileHandle.seek(toOffset: 0)
-                try _fileHandle.write(contentsOf: _store(from: _header))
-                try _currentPage.store(using: _fileHandle)
-            } catch {
-                // Log Error
-                return nil
-            }
+    }
+    deinit {
+        do {
+            try storeHeader()
+            try _currentPage.store(using: _fileHandle)
+        } catch {
+            /// Hmmm. Exception in deinit. Not good.
         }
+    }
+    ///
+    func storeHeader() throws {
+        try _fileHandle.seek(toOffset: _rootAddress)
+        try _fileHandle.write(contentsOf: _store(from: _header))
     }
     ///
     func createNode(with data: Data) throws -> Node {
@@ -130,12 +164,31 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
         _currentPage = newPage
     }
     ///
+    func provideSpaceInCurrentPage() throws {
+        if _currentPage.info._next != Address.invalid {
+            // move some of the nodes from the current page to the next, if that is possible.
+            // Otherwise create a new page and split the nodes between the current and the new page.
+            var nextPage = IndexPage(address: _currentPage.info._next, maxNodes: _maxElementsPerPage)
+            try nextPage.load(using: _fileHandle, from: _currentPage.info._next, what: .Info)
+            if nextPage.info._availableNodes < nextPage.info._maxNodes/2 {
+                try nextPage.load(using: _fileHandle, from: nextPage.info._address, what: .Nodes)
+                let elementsCount = nextPage.info._maxNodes/2
+                try _currentPage.moveNodes((_currentPage.info._availableNodes-elementsCount..<_currentPage.info._availableNodes), into: &nextPage)
+                try nextPage.store(using: _fileHandle)
+                try _currentPage.store(using: _fileHandle)
+            }
+        }
+        if _currentPage.isFull {
+            try splitCurrentPage()
+        }
+    }
+    ///
     func splitCurrentPage() throws {
         var newPage = IndexPage(address: _fileHandle.seekToEndOfFile(), maxNodes: _maxElementsPerPage)
         newPage.info._prev = _currentPage.info._address
         newPage.info._next = _currentPage.info._next
         // Update the _curPage.info._next page to point to the newPage.
-        if _currentPage.info._next > 0 {
+        if _currentPage.info._next != Address.invalid {
             var pageToUpdate = IndexPage(address: _currentPage.info._next, maxNodes: _maxElementsPerPage)
             try pageToUpdate.load(using: _fileHandle, from: _currentPage.info._next, what: .Info)
             pageToUpdate.info._prev = newPage.info._address
@@ -158,48 +211,80 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
         return _currentPage.isValidIndex(indexRelativeToCurrentPage(position))
     }
     ///
-    /*mutating*/
-    func loadPageFor(position: Index) throws {
-        guard isItemInCurrentPage(at: position) == false else { return }
+    func findPageForInsertion(position: Index) throws {
+        var startPos = _currentPage_startIndex
+        var range = (startPos...startPos + _currentPage.info._availableNodes)
+        guard range.contains(position) == false else { return  }
         try _currentPage.store(using: _fileHandle)
-        let traverseUp = (position < _currentPage_startIndex)
-        while isItemInCurrentPage(at: position) == false {
-            if _currentPage.info._availableNodes > 0 {
-                if traverseUp != (position < _currentPage_startIndex) {
-                    throw LAErrors.IndexMismatch
-                }
-            }
-//            guard traverseUp == (index < _currentPage_startIndex) && (_currentPage.info._availableNodes > 0) else { throw LAErrors.IndexMismatch }
-            let addressToLoad = traverseUp ? _currentPage.info._prev : _currentPage.info._next
-            guard addressToLoad != 0 else {
-                throw LAErrors.CorruptedPageAddress
-            }
-            if traverseUp == false { _currentPage_startIndex += _currentPage.info._availableNodes }
-            try _currentPage.load(using: _fileHandle, from: addressToLoad, what: .Info)
-            if traverseUp == true { _currentPage_startIndex -= _currentPage.info._availableNodes }
+        let direction = position > range.upperBound ? WalkDirection.Down: WalkDirection.Up
+        while range.contains(position) == false {
+            let address = (direction == .Up) ? _currentPage.info._prev : _currentPage.info._next
+            guard address != Address.invalid else { throw LAErrors.PositionOutOfRange }
+            if direction == .Down { startPos += _currentPage.info._availableNodes }
+            try _currentPage.load(using: _fileHandle, from: address)
+            if direction == .Up { startPos -= _currentPage.info._availableNodes }
+            range = (startPos...startPos+_currentPage.info._availableNodes)
         }
+        _currentPage_startIndex = startPos
+        try _currentPage.load(using: _fileHandle, from: _currentPage.info._address, what: .Nodes)
+    }
+    ///
+    func findPageForAccess(position: Index) throws {
+        var startPos = _currentPage_startIndex
+        var range = (startPos..<startPos + _currentPage.info._availableNodes)
+        guard range.contains(position) == false else { return }
+        try _currentPage.store(using: _fileHandle)
+        let direction = position < range.upperBound ? WalkDirection.Up: WalkDirection.Down
+        while range.contains(position) == false {
+            let address = (direction == .Up) ? _currentPage.info._prev : _currentPage.info._next
+            guard address != Address.invalid else { throw LAErrors.PositionOutOfRange }
+            if direction == .Down { startPos += _currentPage.info._availableNodes }
+            try _currentPage.load(using: _fileHandle, from: address, what: .Info)
+            if direction == .Up { startPos -= _currentPage.info._availableNodes }
+            range = (startPos..<startPos+_currentPage.info._availableNodes)
+        }
+        _currentPage_startIndex = startPos
         try _currentPage.load(using: _fileHandle, from: _currentPage.info._address, what: .Nodes)
     }
     ///
     /*mutating*/
     func getNodeFor(position: Index) throws -> Node {
-        try loadPageFor(position: position)
+        try findPageForAccess(position: position)
         return _currentPage.node(at: indexRelativeToCurrentPage(position))
     }
     ///
-    func addNodeToFreePool(_ node: Node) {
-        if _header._startFreeAddress == 0 {
-//            _freeNodes = LargeArray()
-        }
+    func addNodeToFreePool(_ node: Node) throws {
     }
     /// When nodes are removed the current page can become empty and perhaps a page with some data should be loaded. Perhaps not?!?!?
-    func adjustCurrentPageIfRequired() {
+    func adjustCurrentPageIfRequired() throws {
+        if _header._count  == 0 {
+            guard _currentPage_startIndex == 0 else { throw LAErrors.CorruptedStartIndex}
+            try _currentPage.load(using: _fileHandle, from: _header._startPageAddress)
+            return
+        }
         if _currentPage.info._availableNodes == 0 {
-            // The current Page is empty so load a page with proper indexes, if available.
-            // If there are no other pages with data, then we start from the root
-            if _currentPage.info._prev != 0 || _currentPage.info._next != 0 {
-            } else {
-                // There are no page with data - the array is empty
+            try _currentPage.store(using: _fileHandle)
+
+            var loadNodes = false
+            let initialNextAddress = _currentPage.info._address
+            // Go up
+            while _currentPage.info._availableNodes == 0 {
+                guard _currentPage.info._prev != Address.invalid else { break }
+                try _currentPage.load(using: _fileHandle, from: _currentPage.info._prev, what: .Info)
+                _currentPage_startIndex -= _currentPage.info._availableNodes
+                loadNodes = true
+            }
+            if _currentPage.info._availableNodes == 0 && initialNextAddress != Address.invalid{
+                try _currentPage.load(using: _fileHandle, from: initialNextAddress, what: .Info)
+                while _currentPage.info._availableNodes == 0 {
+                    guard _currentPage.info._next != Address.invalid else { break }
+                    try _currentPage.load(using: _fileHandle, from: _currentPage.info._next, what: .Info)
+                    loadNodes = true
+                }
+            }
+            guard _currentPage.info._availableNodes > 0 else { throw LAErrors.CorruptedItemsCount }
+            if loadNodes {
+                try _currentPage.load(using: _fileHandle, from: _currentPage.info._address, what: .Nodes)
             }
         }
     }
@@ -238,7 +323,7 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
                         // TODO: Move the old node+data for reuse.
                         // Create a new node
                         let newNode = try createNode(with: newValue)
-                        addNodeToFreePool(node)
+                        try addNodeToFreePool(node)
                         _currentPage.updateNode(at: indexRelativeToCurrentPage(position), node: newNode)
                     } else {
                         node.used = newValue.count
@@ -255,14 +340,10 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
 //    @inlinable
     public /*mutating*/ func append(_ element: Data) throws {
         try autoreleasepool {
-            if _currentPage.isFull {
-                try createNewCurrentPage()
-            }
-            
             // update the IndexPage and store that too??? Or store the IndexPage only after a number of changes have occurred.
-            try _currentPage.appendNode(createNode(with: element))
+//            try _currentPage.appendNode(createNode(with: element))
+            try appendNode(createNode(with: element))
 //            try _currentPage.store(using: _fileHandle) // store All ... perhaps later???
-            totalCount += 1
         }
     }
 //    @inlinable
@@ -271,11 +352,12 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
             let node = try getNodeFor(position: position)
             _currentPage.removeNode(at: indexRelativeToCurrentPage(position))
             // TODO: Move the old node+data for reuse.
-            addNodeToFreePool(node)
+            try addNodeToFreePool(node)
             
 //            try _currentPage.store(using: _fileHandle) // store All ... perhaps later???
             totalCount -= 1
-            adjustCurrentPageIfRequired()
+            totalUsedCount -= Address(node.used)
+            try adjustCurrentPageIfRequired()
         }
     }
     ///
@@ -289,15 +371,26 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
             // Find in which page the Element should be inserted.
             // If the pate is full - then split it in a half (creating two linked pages) and insert the new
             // element into one of those pages.
-            try loadPageFor(position: position)
+            try findPageForInsertion(position: position)
             if _currentPage.isFull {
                 // Split into two pages and then insert the item into one of them.
                 try splitCurrentPage()
-                try loadPageFor(position: position)
+                try findPageForInsertion(position: position)
             }
             try _currentPage.insertNode(createNode(with: element), at: indexRelativeToCurrentPage(position))
             totalCount += 1
+            totalUsedCount += Address(element.count)
         }
+    }
+    /// Append a node. The Data associated with the Node is not moved or copied.
+    func appendNode(_ node: Node) throws {
+        try findPageForInsertion(position: _header._count)
+        if _currentPage.isFull {
+            try createNewCurrentPage()
+        }
+        try _currentPage.appendNode(node)
+        totalCount += 1
+        totalUsedCount += Address(node.used)
     }
 }
 @available(macOS 10.15.4, *)

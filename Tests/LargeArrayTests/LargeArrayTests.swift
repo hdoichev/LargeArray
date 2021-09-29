@@ -5,12 +5,15 @@ import Compression
 @available(macOS 10.15.4, *)
 final class LargeArrayTests: XCTestCase {
     let file_path = "/Users/hristo/junk/Test.LargeArray"
+    let file_path2 = "/Users/hristo/junk/Test2.LargeArray"
     let elements_count = 10
     ///
     override func setUp() {
-        if FileManager.default.fileExists(atPath: file_path) {
-            do { try FileManager.default.removeItem(atPath: file_path) }
-            catch { fatalError("Can not remove test file.")}
+        [file_path, file_path2].forEach { path in
+            if FileManager.default.fileExists(atPath: path) {
+                do { try FileManager.default.removeItem(atPath: path) }
+                catch { fatalError("Can not remove test file: \(path)")}
+            }
         }
     }
     ///
@@ -224,26 +227,62 @@ final class LargeArrayTests: XCTestCase {
         } catch {}
     }
     func testRemoveElements_PagePartial() {
+        let maxPerPage = 1024
+        let elementsCount = 1024//*1024*10
+        let elementSize = 100
         do {
-            let la = LargeArray(path: file_path)
+            let la = FreeArray(path: file_path, maxPerPage: maxPerPage)
             XCTAssertNotNil(la)
             guard let la = la else { return }
             for i in 1..<4 {
-                for _ in 0..<1024 { try la.append(Data(repeating: UInt8(i), count: 100)) }
+                let d = Data(repeating: UInt8(i), count: elementSize)
+                for _ in 0..<1024 { try la.append(d) }
             }
+//            let d = Data(repeating: UInt8(9), count: elementSize)
+//            for _ in 0..<elementsCount { try la.append(d) }
             print(la)
             XCTAssertNoThrow(try la.removeSubrange(2048+100..<3072)) // remove elements from the third page
             XCTAssertNoThrow(try la.removeSubrange(1024+100..<2048)) // remove elements from the second page
             XCTAssertNoThrow(try la.removeSubrange(0+100..<1024)) // remove elements from the first page
-            
+//            XCTAssertNoThrow(try la.removeSubrange(1024*500..<la.endIndex)) // remove elements from the first page
+
             for i in 0..<100 { la[i].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } } }
             for i in 100..<200 { la[i].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 2) } } }
             for i in 200..<300 { la[i].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 3) } } }
 
             print(la)
+            print("Used count: \(la.totalUsedBytesCount), Free count: \(la.totalFreeBytesCount)")
+            if let la2 = FreeArray(path: file_path2, maxPerPage: maxPerPage) {
+                try la.forEach { d in
+                    try la2.append(d)
+                }
+                print("Used count: \(la2.totalUsedBytesCount), Free count: \(la2.totalFreeBytesCount)")
+            }
         } catch {}
     }
-    //
+    ///
+    func testRemoveElements_All() {
+        let maxPerPage = 1024
+        let elementsCount = 1024//*1024*10
+        let elementSize = 100
+        do {
+            let la = LargeArray(path: file_path, maxPerPage: maxPerPage)
+            XCTAssertNotNil(la)
+            guard let la = la else { return }
+            for i in 1..<4 {
+                let d = Data(repeating: UInt8(i), count: elementSize)
+                for _ in 0..<elementsCount { try la.append(d) }
+            }
+            //            let d = Data(repeating: UInt8(9), count: elementSize)
+            //            for _ in 0..<elementsCount { try la.append(d) }
+            print(la)
+            XCTAssertNoThrow(try la.removeSubrange(0..<la.count)) // remove all elements
+//            try la.insert(Data(repeating: 1, count: elementSize), at: 0)
+            try la.append(Data(repeating: 1, count: elementSize))
+            print(la)
+        } catch {}
+    }
+    ///
     func testInsertElement_PageSplit() {
         do {
             let la = LargeArray(path: file_path)
@@ -267,6 +306,9 @@ final class LargeArrayTests: XCTestCase {
         var node = Node()
         var node2 = Node()
         var data = Data(repeating: 0, count: MemoryLayout<Node>.size)
+        print("Info size: \(MemoryLayout<IndexPage.Info>.size)")
+        print("Header size: \(MemoryLayout<Header>.size)")
+        print("Node size: \(MemoryLayout<Node>.size)")
         do {
             node.address = 8_555_777_333
             node.used = 123

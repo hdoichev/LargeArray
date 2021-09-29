@@ -16,6 +16,9 @@ enum LAErrors: Error {
     case InvalidFileVersion
     case IndexMismatch
     case CorruptedPageAddress
+    case CorruptedStartIndex
+    case CorruptedItemsCount
+    case PositionOutOfRange
     case NodeIsFull
 }
 
@@ -26,6 +29,9 @@ extension LAErrors: CustomStringConvertible {
         case .InvalidWriteBufferSize: return "InvalidWriteBufferSize"
         case .InvalidReadBufferSize: return "InvalidReadBufferSize"
         case .CorruptedPageAddress: return "CorruptedPageAddress"
+        case .CorruptedStartIndex: return "CorruptedStartIndex"
+        case .CorruptedItemsCount: return "CorruptedItemsCount"
+        case .PositionOutOfRange: return "PositionOutOfRange"
         case .IndexMismatch: return "IndexMismatch"
         case .InvalidAddressInIndexPage: return "InvalidAddressInIndexPage"
         case .InvalidFileVersion: return "InvalidFileVersion"

@@ -9,7 +9,7 @@ import Foundation
 
 ///
 struct Node: Codable {
-    var address: Address = 0
+    var address: Address = Address.invalid
     var used: Int = 0
     var reserved: Int = 0
 }
