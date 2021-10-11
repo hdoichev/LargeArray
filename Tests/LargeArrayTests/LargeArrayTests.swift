@@ -35,7 +35,7 @@ final class LargeArrayTests: XCTestCase {
     ///
     func testAppendNode() {
         do {
-            var la = LargeArray(path: file_path)
+            var la = LargeArray(path: file_path, capacity: 1024*1024)
             XCTAssertNotNil(la)
             guard var la = la else { return }
             try la.append(Data(repeating: 0, count: 10))
@@ -45,7 +45,7 @@ final class LargeArrayTests: XCTestCase {
             let la = LargeArray(path: file_path)
             XCTAssertNotNil(la)
             guard let la = la else { return }
-            XCTAssertEqual(la._currentPage.info._availableNodes, 1)
+            XCTAssertEqual(la._currentPage.info.availableNodes, 1)
 //            la[0].dump()
         } catch {}
     }
@@ -59,7 +59,7 @@ final class LargeArrayTests: XCTestCase {
             for i in 0..<numElements {
                 try la.append(Data(repeating: UInt8(i % 128), count: 10))
             }
-            print("Nodes.count = \(la._currentPage.info._availableNodes)")
+            print("Nodes.count = \(la._currentPage.info.availableNodes)")
         } catch {}
         // read the file
         do {
@@ -204,7 +204,7 @@ final class LargeArrayTests: XCTestCase {
         let elementsCount = 1024//*1024*10
         let elementSize = 100
         do {
-            let la = FreeArray(path: file_path, maxPerPage: maxPerPage)
+            let la = LargeArray(path: file_path, maxPerPage: maxPerPage)
             XCTAssertNotNil(la)
             guard let la = la else { return }
             for i in 1..<4 {
@@ -225,11 +225,11 @@ final class LargeArrayTests: XCTestCase {
 
             print(la)
             print("Used count: \(la.totalUsedBytesCount), Free count: \(la.totalFreeBytesCount)")
-            if let la2 = FreeArray(path: file_path2, maxPerPage: maxPerPage) {
+            if let la2 = LargeArray(path: file_path2, maxPerPage: maxPerPage) {
                 try la.forEach { d in
                     try la2.append(d)
                 }
-                print("Used count: \(la2.totalUsedBytesCount), Free count: \(la2.totalFreeBytesCount)")
+//                print("Used count: \(la2.totalUsedBytesCount), Free count: \(la2.totalFreeBytesCount)")
             }
             //
             for (k,v) in try la.indexPagesInfo().enumerated() {

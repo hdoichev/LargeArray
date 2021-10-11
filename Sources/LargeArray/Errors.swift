@@ -20,6 +20,10 @@ enum LAErrors: Error {
     case CorruptedItemsCount
     case PositionOutOfRange
     case NodeIsFull
+    case AllocationFailed
+    case ErrorConstructingSourcePointer
+    case InvlaidAllocatedSize
+    case InvlaidNodeAddress
 }
 
 extension LAErrors: CustomStringConvertible {
@@ -37,6 +41,10 @@ extension LAErrors: CustomStringConvertible {
         case .InvalidFileVersion: return "InvalidFileVersion"
         case .NilBaseAddress: return "NilBaseAddress"
         case .NodeIsFull: return "NodeIsFull"
+        case .AllocationFailed: return "AllocationFailed"
+        case .ErrorConstructingSourcePointer: return "ErrorConstructingSourcePointer"
+        case .InvlaidAllocatedSize: return "InvlaidAllocatedSize"
+        case .InvlaidNodeAddress: return "InvlaidNodeAddress"
         }
     }
 }

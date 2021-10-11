@@ -6,20 +6,22 @@
 //
 
 import Foundation
+import Allocator
 
+typealias Nodes = ContiguousArray<Node>
 ///
 @available(macOS 10.15.4, *)
 public struct PageInfo: Codable {
-    let _address: Address
-    var _availableNodes: LargeArray.Index
-    var _maxNodes: LargeArray.Index
-    var _next: Address
-    var _prev: Address
+    var nodes_address: Address = Address.max
+    var availableNodes: LargeArray.Index = 0
+    var maxNodes: LargeArray.Index = 0
+    var next: Address = Address.max
+    var prev: Address = Address.max
 }
 
 ///
 @available(macOS 10.15.4, *)
-struct IndexPage: Codable {
+struct IndexPage {
     enum Properties {
         case All, Info, Nodes
     }
@@ -41,37 +43,100 @@ struct IndexPage: Codable {
         _dirty
     }
     var isFull: Bool {
-        return _info._availableNodes >= _info._maxNodes 
+        return _info.availableNodes >= _info.maxNodes 
     }
-    
+    var pageAddress: Address {
+        return _infoChunks[0].address
+    }
     private var _info: PageInfo
-    private var _nodes: ContiguousArray<Node>
+    private var _nodes: Nodes
     private var _dirty: Dirty
+    private var _infoChunks: Allocator.Chunks
+    private var _nodeChunks: Allocator.Chunks
+    private var _storage: StorageSystem
     ///
-    init(address: Address, maxNodes: LargeArray.Index) {
-        _info = PageInfo(_address: address, _availableNodes: 0, _maxNodes: maxNodes, _next: Address.invalid, _prev: Address.invalid)
-        _nodes = ContiguousArray<Node>()
+    init() {
+        _info = PageInfo()
+        _nodes = Nodes()
+        _dirty = Dirty()
+        _infoChunks = Allocator.Chunks()
+        _nodeChunks = Allocator.Chunks()
+        _storage = StorageSystem(fileHandle: FileHandle(), allocator: Allocator(capacity: 0), nodeCache: 0, pageCache: 0)
+    }
+    ///
+    init(maxNodes: LargeArray.Index, using storage: StorageSystem) throws {
+        _storage = storage
+        guard let ainfo = _storage.allocator.allocate(MemoryLayout<PageInfo>.size, overhead: MemoryLayout<Node>.size) else { throw LAErrors.AllocationFailed }
+        guard let anodes = _storage.allocator.allocate(MemoryLayout<Node>.size * maxNodes,
+                                                       overhead: MemoryLayout<Node>.size) else {
+            _storage.allocator.deallocate(chunks: ainfo)
+            throw LAErrors.AllocationFailed }
+        _infoChunks = ainfo
+        _nodeChunks = anodes
+        guard _infoChunks.allocatedCount >= MemoryLayout<PageInfo>.size + MemoryLayout<Node>.size else {
+            _storage.allocator.deallocate(chunks: ainfo)
+            _storage.allocator.deallocate(chunks: anodes)
+            throw LAErrors.InvlaidAllocatedSize }
+        _info = PageInfo(nodes_address: _infoChunks[0].address,
+                         availableNodes: 0, maxNodes: maxNodes, next: Address.invalid, prev: Address.invalid)
+        _nodes = Nodes()
         _dirty = Dirty(info: true, nodes: true)
+    }
+    ///
+    init(address: Address, using storage: StorageSystem) throws {
+        _info = PageInfo()
+        _nodes = Nodes()
+        _dirty = Dirty()
+        _infoChunks = Allocator.Chunks()
+        _nodeChunks = Allocator.Chunks()
+        _storage = storage
+        
+        try _loadInfo(from: address)
+        // load node ???
+        _nodeChunks = Allocator.Chunks()
+    }
+    /// Deallocate the page and remove it from the prev/next chain,
+    /// by linking the prev and next to one another
+    ///
+    mutating func deallocate() throws {
+        _storage.allocator.deallocate(chunks: _nodeChunks)
+        _storage.allocator.deallocate(chunks: _infoChunks)
+        // remove this page from the prev and next pages.
+        if _info.prev != Address.max {
+            var prevInfo = try PageInfo.load(using: _storage, at: _info.prev)
+            prevInfo.0.next = _info.next
+            try prevInfo.0.store(using: _storage, with: prevInfo.1)
+        }
+        if _info.next != Address.max {
+            var nextInfo = try PageInfo.load(using: _storage, at: _info.next)
+            nextInfo.0.prev = _info.prev
+            try nextInfo.0.store(using: _storage, with: nextInfo.1)
+        }
+        _info = PageInfo()
+        _nodes = Nodes()
+        _dirty = Dirty()
+        _infoChunks = Allocator.Chunks()
+        _nodeChunks = Allocator.Chunks()
     }
     ///
     mutating func appendNode(_ node: Node) throws {
         guard isFull == false else { throw LAErrors.NodeIsFull }
         _dirty.nodes = true
         _nodes.append(node)
-        info._availableNodes += 1
+        info.availableNodes += 1
     }
     ///
     mutating func insertNode(_ node: Node, at position: LargeArray.Index) throws {
         guard isFull == false else { throw LAErrors.NodeIsFull }
         _dirty.nodes = true
         _nodes.insert(node, at: position)
-        info._availableNodes += 1
+        info.availableNodes += 1
     }
     ///
     mutating func removeNode(at position: LargeArray.Index) {
         _dirty.nodes = true
         _nodes.remove(at: position)
-        info._availableNodes -= 1
+        info.availableNodes -= 1
     }
     ///
     mutating func updateNode(at position: LargeArray.Index, node: Node) {
@@ -88,79 +153,69 @@ struct IndexPage: Codable {
             try page.appendNode(node(at: i))
         }
         _nodes.removeSubrange(range)
-        _info._availableNodes = _nodes.count
+        _info.availableNodes = _nodes.count
         _dirty.nodes = true
     }
     ///
     func isValidIndex(_ position: LargeArray.Index) -> Bool {
-        return (0..<_info._availableNodes).contains(position)
+        return (0..<_info.availableNodes).contains(position)
     }
 }
 
 @available(macOS 10.15.4, *)
 extension IndexPage {
     ///
-    mutating func store(using storageAccessor: StorageAccessor) throws {
+    mutating func store() throws {
         guard _dirty.isDirty else { return }
         if _dirty.info {
-            _info._availableNodes = _nodes.count // preserve the count of the actual nodes, so we can properly load the nodes data
-            var data = Data(count: MemoryLayout<PageInfo>.size)
-            data.withUnsafeMutableBytes { buffer in
-                let out_buffer = buffer.bindMemory(to: PageInfo.self)
-                out_buffer[0] = _info
-            }
-            try storageAccessor.write(data, at: _info._address)
+            _info.availableNodes = _nodes.count // preserve the count of the actual nodes, so we can properly load the nodes data
+            try _store(from: _info).storeWithNodes(chunks: _infoChunks, using: _storage.fileHandle)
             _dirty.info = false
-        } else {
-            try storageAccessor.seek(to: _info._address + Address(MemoryLayout<PageInfo>.size))
         }
         // Store the nodes into the data buffer
         // When storing we always store the _maxNodes size. This prevents the relocation of the IndexPage when elements are added/removed from it.
         // When loading the nodes the _availableNodes is used to read the nodes data, thus only the actual stored elements are loaded.
         //        var nodesData = Data(count: MemoryLayout<Node>.size * Int(_info._maxNodes))
         if _dirty.nodes {
-            var nodesData = Data(repeating: 0, count: MemoryLayout<Node>.size * Int(_info._maxNodes))
+            var nodesData = Data(repeating: 0, count: MemoryLayout<Node>.size * Int(_info.maxNodes))
             nodesData.withUnsafeMutableBytes { dest in
                 _nodes.withUnsafeBytes { source in
                     dest.copyBytes(from: source)
                 }
             }
-            try storageAccessor.write(data: nodesData)
+            try nodesData.storeWithNodes(chunks: _nodeChunks, using: _storage.fileHandle)
             _dirty.nodes = false
         }
     }
     ///
-    mutating func _loadInfo(using storageAccessor: StorageAccessor, from address: Address) throws {
-        guard let data = try storageAccessor.read(from: address, upToCount: MemoryLayout<PageInfo>.size) else { throw LAErrors.ErrorReadingData }
-        try _load(into: &self.info, from: data)
-        guard self._info._address == address else { throw LAErrors.InvalidAddressInIndexPage }
+    mutating func _loadInfo(from address: Address) throws {
+        let li = try Data.loadFromNodes(start: address, byteCount: MemoryLayout<PageInfo>.size, using: _storage.fileHandle)
+        _infoChunks = li.1
+        try _load(into: &_info, from: li.0)
         _dirty.info = false
     }
     ///
-    mutating func _loadNodes(using storageAccessor: StorageAccessor, from address: Address?) throws {
-        guard _info._availableNodes > 0 else { _nodes.removeAll(); return }
-        if let address = address {
-            try storageAccessor.seek(to: address + Address(MemoryLayout<PageInfo>.size))
-        }
-        let nodesSize = MemoryLayout<Node>.size * _info._availableNodes
-        guard let nodesData = try storageAccessor.read(bytesCount: nodesSize) else { throw LAErrors.ErrorReadingData }
-        guard nodesSize == nodesData.count else { throw LAErrors.InvalidReadBufferSize }
-        _nodes = ContiguousArray<Node>(repeating: Node(), count: Int(_info._availableNodes))
-        _nodes.withUnsafeMutableBufferPointer { nodesData.copyBytes(to: $0) }
+    mutating func _loadNodes() throws {
+        guard _info.availableNodes > 0 else { _nodes.removeAll(); return }
+        let li = try Data.loadFromNodes(start: _info.nodes_address,
+                                        byteCount: MemoryLayout<Node>.size * _info.availableNodes, using: _storage.fileHandle)
+        _nodeChunks = li.1
+        _nodes = Nodes(repeating: Node(), count: Int(_info.availableNodes))
+        _nodes.withUnsafeMutableBufferPointer { li.0.copyBytes(to: $0) }
         _dirty.nodes = false
     }
     ///
-    mutating func load(using storageAccessor: StorageAccessor, from address: Address, what: Properties = .All) throws {
+    mutating func load(from address: Address, what: Properties = .All) throws {
         switch what {
         case .All:
-            try _loadInfo(using: storageAccessor, from: address)
-            try _loadNodes(using: storageAccessor, from: nil) // the Storage should already be positioned at the start of the Nodes section so seek is not needed.
+            try _loadInfo(from: address)
+            try _loadNodes() // the Storage should already be positioned at the start of the Nodes section so seek is not needed.
         case .Info:
-            try _loadInfo(using: storageAccessor, from: address)
+            try _loadInfo(from: address)
             // after loading the info the nodes can't be marked as dirty
             _dirty.nodes = false
         case .Nodes:
-            try _loadNodes(using: storageAccessor, from: address)
+            try _loadNodes()
         }
     }
 }
@@ -169,7 +224,7 @@ extension IndexPage {
 extension IndexPage: CustomStringConvertible {
     var description: String {
         return """
-        Page(Address: \(_info._address), AvailableNodes: \(_info._availableNodes) (\(_nodes.count)), Prev: \(_info._prev), Next: \(_info._next))
+        Page(Address: \(_info.nodes_address), AvailableNodes: \(_info.availableNodes) (\(_nodes.count)), Prev: \(_info.prev), Next: \(_info.next))
         """
     }
 }
@@ -188,11 +243,14 @@ extension PageInfo: Equatable {
 
 @available(macOS 10.15.4, *)
 extension PageInfo{
-    static func load(from storageAccessor: StorageAccessor, at address: Address) throws -> PageInfo {
-        guard let data = try storageAccessor.read(from: address, upToCount: MemoryLayout<PageInfo>.size) else { throw LAErrors.ErrorReadingData }
-        var info = PageInfo(_address: Address.invalid, _availableNodes: 0, _maxNodes: 0, _next: Address.invalid, _prev: Address.invalid)
-        try _load(into: &info, from: data)
-        return info
+    func store(using storage: StorageSystem, with chunks: Allocator.Chunks) throws {
+        try _store(from: self).storeWithNodes(chunks: chunks, using: storage.fileHandle)
+    }
+    static func load(using storage: StorageSystem, at address: Address) throws -> (PageInfo, Allocator.Chunks) {
+        let li = try Data.loadFromNodes(start: address, byteCount: MemoryLayout<PageInfo>.size, using: storage.fileHandle)
+        var info = PageInfo()
+        try _load(into: &info, from: li.0)
+        return (info, li.1)
     }
 }
 

@@ -15,11 +15,11 @@ final class MiscTests: XCTestCase {
 
     ///
     func testStoreArrayToData() {
-        var nodes = ContiguousArray<Node>(repeating: Node(address: 0, used: 0, reserved: 0), count: elements_count)
+        var nodes = ContiguousArray<Node>(repeating: Node(chunk_address: 0, used: 0, reserved: 0), count: elements_count)
         let nodesDataSize = MemoryLayout<Node>.size * Int(elements_count)
         var nodesData = Data(count: nodesDataSize)
         for i in 0..<nodes.count {
-            nodes[i].address = Address(i)
+            nodes[i].chunk_address = Address(i)
             nodes[i].used = i
             nodes[i].reserved = i
         }
@@ -35,7 +35,7 @@ final class MiscTests: XCTestCase {
             let raw_nodes = bytes.bindMemory(to: Node.self)
         }
         // now init the arrat from the data
-        var loadedNodes = ContiguousArray<Node>(repeating: Node(address: 0, used: 0, reserved: 0), count: elements_count)
+        var loadedNodes = ContiguousArray<Node>(repeating: Node(chunk_address: 0, used: 0, reserved: 0), count: elements_count)
         loadedNodes.withUnsafeMutableBufferPointer { dest in
             nodesData.copyBytes(to: dest)
         }
@@ -51,7 +51,7 @@ final class MiscTests: XCTestCase {
         print("Header size: \(MemoryLayout<Header>.size)")
         print("Node size: \(MemoryLayout<Node>.size)")
         do {
-            node.address = 8_555_777_333
+            node.chunk_address = 8_555_777_333
             node.used = 123
             node.reserved = 456
             data = try _store(from: node)
@@ -71,7 +71,7 @@ final class MiscTests: XCTestCase {
         measure {
             do {
                 for i in 0..<100_000 {
-                    node.address = Address(i)
+                    node.chunk_address = Address(i)
                     node.used = 123
                     node.reserved = 456
                     data = try _store(from: node)
@@ -90,7 +90,7 @@ final class MiscTests: XCTestCase {
         let a1_2 = ContiguousArray<Node>(repeating: Node(), count: elements_count)
         a1.reserveCapacity(elements_count)
         for _ in 0..<elements_count {
-            a1.append(Node(address: UInt64.random(in: 100_000_000..<8_000_000_000_000_000),
+            a1.append(Node(chunk_address: Int.random(in: 100_000_000..<8_000_000_000_000_000),
                            used: Int.random(in: 1_000_000..<8_000_000),
                            reserved: Int.random(in: 8_000_000..<16_000_000)))
         }
