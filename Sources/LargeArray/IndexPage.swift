@@ -77,7 +77,7 @@ struct IndexPage {
             _storage.allocator.deallocate(chunks: ainfo)
             _storage.allocator.deallocate(chunks: anodes)
             throw LAErrors.InvlaidAllocatedSize }
-        _info = PageInfo(nodes_address: _infoChunks[0].address,
+        _info = PageInfo(nodes_address: _nodeChunks[0].address,
                          availableNodes: 0, maxNodes: maxNodes, next: Address.invalid, prev: Address.invalid)
         _nodes = Nodes()
         _dirty = Dirty(info: true, nodes: true)
@@ -92,8 +92,8 @@ struct IndexPage {
         _storage = storage
         
         try _loadInfo(from: address)
-        // load node ???
-        _nodeChunks = Allocator.Chunks()
+        // load nodes ???
+        try _loadNodes()
     }
     /// Deallocate the page and remove it from the prev/next chain,
     /// by linking the prev and next to one another
@@ -224,7 +224,7 @@ extension IndexPage {
 extension IndexPage: CustomStringConvertible {
     var description: String {
         return """
-        Page(Address: \(_info.nodes_address), AvailableNodes: \(_info.availableNodes) (\(_nodes.count)), Prev: \(_info.prev), Next: \(_info.next))
+        Page(Address: \(pageAddress), AvailableNodes: \(_info.availableNodes) (\(_nodes.count)), Prev: \(_info.prev), Next: \(_info.next))
         """
     }
 }

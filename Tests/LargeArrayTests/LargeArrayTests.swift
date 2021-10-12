@@ -19,7 +19,7 @@ final class LargeArrayTests: XCTestCase {
     ///
     func testCreateEmptyLargeArray() {
         do {
-            let la = LargeArray(path: file_path)
+            let la = LargeArray(path: file_path, capacity: 1024*1024)
             XCTAssertNotNil(la)
             guard let la = la else { return }
             print("Version: \(la._header)")
@@ -75,13 +75,17 @@ final class LargeArrayTests: XCTestCase {
 //                print("Index: \(i): \(node), \(la._currentPage)")
                 print("Position: \(i): \(node)")
             }
-            
+            for i in 0..<numElements {
+                la[i].forEach{XCTAssertEqual($0, UInt8(i % 128))}
+            }
+
             for n in la { XCTAssertEqual(n.count, 10) }
             la.forEach { XCTAssertEqual($0.count, 10) }
             
             la[0] = Data(repeating: 19, count: 19)
             XCTAssertEqual(la[0].count, 19)
             print(la)
+            print(try la.indexPagesInfo())
 //            print(MemoryLayout<Node>.description)
 //            print(la._currentPage._nodes[10000].reserved)
         } catch {

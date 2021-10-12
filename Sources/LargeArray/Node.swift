@@ -86,23 +86,46 @@ extension Data {
         var chunks = Allocator.Chunks()
         var n = Node()
         var loadAddress = address
-        let overhead = MemoryLayout<Node>.size
 //        try data.withUnsafeMutableBytes { buffer in
         // The Data is guaranteed to be in this form:
         //  Node
         //  Data
         // Where the Node.used is the size of the data
-        while data.count != byteCount {
+        while loadAddress != Address.max {
             guard loadAddress != Address.max else { throw LAErrors.InvlaidNodeAddress }
             try n.load(using: fileHandle, from: loadAddress)
-            let loadCount = n.used - overhead
-            guard loadCount > 0 else { throw LAErrors.InvlaidAllocatedSize }
-            guard let chunkData = try fileHandle.read(bytesCount: loadCount) else { throw LAErrors.ErrorReadingData }
+            if data.count < byteCount {
+                guard n.used > 0 else { throw LAErrors.InvlaidAllocatedSize }
+                let toRead = Swift.min(n.used, byteCount - data.count)
+                guard let chunkData = try fileHandle.read(bytesCount: toRead) else { throw LAErrors.ErrorReadingData }
+                data += chunkData
+            }
+            chunks.append(Allocator.Chunk(address: loadAddress, count: n.reserved))
+            loadAddress = n.chunk_address
+        }
+//        }
+        return (data, chunks)
+    }
+    static func loadFromNodes(start address: Address, using fileHandle: FileHandle) throws -> (Data,Allocator.Chunks) {
+        //        var data = Data(repeating: 0, count: byteCount)
+        var data = Data()
+        var chunks = Allocator.Chunks()
+        var n = Node()
+        var loadAddress = address
+        //        try data.withUnsafeMutableBytes { buffer in
+        // The Data is guaranteed to be in this form:
+        //  Node
+        //  Data
+        // Where the Node.used is the size of the data
+        while loadAddress != Address.max {
+            try n.load(using: fileHandle, from: loadAddress)
+            guard n.used > 0 else { throw LAErrors.InvlaidAllocatedSize }
+            guard let chunkData = try fileHandle.read(bytesCount: n.used) else { throw LAErrors.ErrorReadingData }
             chunks.append(Allocator.Chunk(address: loadAddress, count: n.reserved))
             data += chunkData
             loadAddress = n.chunk_address
         }
-//        }
+        //        }
         return (data, chunks)
     }
 }
