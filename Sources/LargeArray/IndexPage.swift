@@ -198,7 +198,7 @@ extension IndexPage {
     }
     ///
     mutating func _loadInfo(from address: Address) throws {
-        let di = try Data.loadFromNodes(start: address, byteCount: MemoryLayout<PageInfo>.size, using: _storage.fileHandle)
+        let di = try Data.loadFromNodes(start: address, upTo: MemoryLayout<PageInfo>.size, using: _storage.fileHandle)
         try _load(into: &_info, from: di)
         _infoAddress = address
         _dirty.info = false
@@ -208,7 +208,7 @@ extension IndexPage {
         guard _info.nodes_address != Int.max else { throw LAErrors.InvalidNodeAddress }
         guard _info.availableNodes > 0 else { _nodes.removeAll(); return }
         let nd = try Data.loadFromNodes(start: _info.nodes_address,
-                                        byteCount: MemoryLayout<Node>.size * _info.availableNodes, using: _storage.fileHandle)
+                                        upTo: MemoryLayout<Node>.size * _info.availableNodes, using: _storage.fileHandle)
         _nodes = Nodes(repeating: Node(), count: Int(_info.availableNodes))
         _nodes.withUnsafeMutableBufferPointer { nd.copyBytes(to: $0) }
         _dirty.nodes = false
@@ -259,7 +259,7 @@ extension PageInfo{
         try _store(from: self).storeWithNodes(chunks: chunks, using: storage.fileHandle)
     }
     static func load(using storage: StorageSystem, at address: Address) throws -> PageInfo {
-        let di = try Data.loadFromNodes(start: address, byteCount: MemoryLayout<PageInfo>.size, using: storage.fileHandle)
+        let di = try Data.loadFromNodes(start: address, upTo: MemoryLayout<PageInfo>.size, using: storage.fileHandle)
         var info = PageInfo()
         try _load(into: &info, from: di)
         return info

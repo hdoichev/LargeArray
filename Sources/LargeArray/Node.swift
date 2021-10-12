@@ -39,7 +39,7 @@ extension Node {
         try fileHandle.write(_store(from: self), at: address)
     }
     func loadData(using fileHandle: FileHandle) throws -> Data {
-        return try Data.loadFromNodes(start: self.chunk_address, byteCount: self.used, using: fileHandle)
+        return try Data.loadFromNodes(start: self.chunk_address, upTo: self.used, using: fileHandle)
     }
     func getChunksForData(using fileHandle: FileHandle) throws -> Allocator.Chunks {
         var chunks = Allocator.Chunks()
@@ -107,7 +107,7 @@ extension Data {
             }
         }
     }
-    static func loadFromNodes(start address: Address, byteCount: Int, using fileHandle: FileHandle) throws -> Data {
+    static func loadFromNodes(start address: Address, upTo byteCount: Int, using fileHandle: FileHandle) throws -> Data {
 //        var data = Data(repeating: 0, count: byteCount)
         var data = Data(capacity: byteCount)
         var n = Node()
