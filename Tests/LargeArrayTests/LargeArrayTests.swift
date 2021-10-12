@@ -53,7 +53,7 @@ final class LargeArrayTests: XCTestCase {
     func testAppendMultipleNodes() {
         let numElements = 1024*2
         do {
-            var la = LargeArray(path: file_path)
+            var la = LargeArray(path: file_path, capacity: 1024*1024)
             XCTAssertNotNil(la)
             guard var la = la else { return }
             for i in 0..<numElements {
@@ -119,13 +119,13 @@ final class LargeArrayTests: XCTestCase {
             XCTAssertNotNil(la)
             guard let la = la else { return }
             for i in 0..<numElements {
-                try la.append(Data(repeating: UInt8(i % 128), count: Int.random(in: 100..<2000)))
+                try la.append(Data(repeating: UInt8(i % 128), count: Int.random(in: 1000..<2000)))
             }
             print(la)
             measure {
                 for n in la {
 //                    XCTAssertTrue((10..<2000).contains(n.count))
-                    if (100..<2000).contains(n.count) == false {
+                    if (1000..<2000).contains(n.count) == false {
                         print("ERROR")
                         break
                     }
@@ -280,6 +280,49 @@ final class LargeArrayTests: XCTestCase {
             la[1024].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 4) } }
             try la.insert(Data(repeating: 3, count: 100), at: 1023)
             la[1023].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 3) } }
+            print(la)
+            for (k,v) in try la.indexPagesInfo().enumerated() {
+                print(k, v)
+            }
+        } catch {
+            XCTFail()
+        }
+    }
+    ///
+    func testAppendArrays() {
+        do {
+            let elementsCount = 1*1024
+            let la = LargeArray(path: file_path)
+            XCTAssertNotNil(la)
+            guard let la = la else { return }
+            // Ints
+            for i in 0..<elementsCount { try autoreleasepool { try la.append([Int](repeating: i, count: i)) } }
+            for i in 0..<elementsCount {
+                autoreleasepool {
+                let ints: [Int] = la[i]
+                XCTAssertEqual(i, ints.count)
+                ints.forEach { XCTAssertEqual($0, i) }
+                }
+            }
+            // Floats
+            for i in 0..<elementsCount { try autoreleasepool { try la.append([Float](repeating: Float(i), count: i)) } }
+            for i in 0..<elementsCount {
+                autoreleasepool {
+                    let floats: [Float] = la[i + 1024]
+                    XCTAssertEqual(i, floats.count)
+                    floats.forEach { XCTAssertEqual($0, Float(i)) }
+                }
+            }
+            // String
+            for i in 0..<elementsCount { try autoreleasepool { try la.append([String](repeating: "\(i)", count: i)) } }
+            for i in 0..<elementsCount {
+                autoreleasepool {
+                    let strings: [String] = la[i + 2048]
+                    XCTAssertEqual(i, strings.count)
+                    strings.forEach { XCTAssertEqual($0, "\(i)") }
+                }
+            }
+
             print(la)
             for (k,v) in try la.indexPagesInfo().enumerated() {
                 print(k, v)
