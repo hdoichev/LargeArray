@@ -22,8 +22,8 @@ enum LAErrors: Error {
     case NodeIsFull
     case AllocationFailed
     case ErrorConstructingSourcePointer
-    case InvlaidAllocatedSize
-    case InvlaidNodeAddress
+    case InvalidAllocatedSize
+    case InvalidNodeAddress
 }
 
 extension LAErrors: CustomStringConvertible {
@@ -43,8 +43,8 @@ extension LAErrors: CustomStringConvertible {
         case .NodeIsFull: return "NodeIsFull"
         case .AllocationFailed: return "AllocationFailed"
         case .ErrorConstructingSourcePointer: return "ErrorConstructingSourcePointer"
-        case .InvlaidAllocatedSize: return "InvlaidAllocatedSize"
-        case .InvlaidNodeAddress: return "InvlaidNodeAddress"
+        case .InvalidAllocatedSize: return "InvalidAllocatedSize"
+        case .InvalidNodeAddress: return "InvalidNodeAddress"
         }
     }
 }

@@ -18,62 +18,60 @@ final class LargeArrayTests: XCTestCase {
     }
     ///
     func testCreateEmptyLargeArray() {
-        do {
+        func create() {
             let la = LargeArray(path: file_path, capacity: 1024*1024)
             XCTAssertNotNil(la)
             guard let la = la else { return }
             print("Version: \(la._header)")
-        } catch {}
+        }
+        create()
         // read the file
-        do {
+        func readFile() {
             let la = LargeArray(path: file_path)
             XCTAssertNotNil(la)
             guard let la = la else { return }
             print("Version: \(la._header)")
-        } catch {}
+        }
+        readFile()
     }
     ///
     func testAppendNode() {
-        do {
-            var la = LargeArray(path: file_path, capacity: 1024*1024)
-            XCTAssertNotNil(la)
-            guard var la = la else { return }
-            try la.append(Data(repeating: 0, count: 10))
-        } catch {}
+        func createFile() {
+            guard let la = LargeArray(path: file_path, capacity: 1024*1024) else { XCTFail("LargeArray init failed"); return }
+            XCTAssertNoThrow( try la.append(Data(repeating: 0, count: 10)))
+        }
+        createFile()
         // read the file
-        do {
-            let la = LargeArray(path: file_path)
-            XCTAssertNotNil(la)
-            guard let la = la else { return }
+        func readFile() {
+            guard let la = LargeArray(path: file_path) else { XCTFail("LargeArray init failed"); return }
             XCTAssertEqual(la._currentPage.info.availableNodes, 1)
 //            la[0].dump()
-        } catch {}
+        }
+        readFile()
     }
     ///
     func testAppendMultipleNodes() {
         let numElements = 1024*2
-        do {
-            var la = LargeArray(path: file_path, capacity: 1024*1024)
-            XCTAssertNotNil(la)
-            guard var la = la else { return }
+        func create() {
+            guard let la = LargeArray(path: file_path, capacity: 1024*1024) else { XCTFail("LargeArray init failed"); return }
             for i in 0..<numElements {
-                try la.append(Data(repeating: UInt8(i % 128), count: 10))
+                XCTAssertNoThrow( try la.append(Data(repeating: UInt8(i % 128), count: 10)))
             }
             print("Nodes.count = \(la._currentPage.info.availableNodes)")
-        } catch {}
+        }
+        create()
         // read the file
-        do {
-            let la = LargeArray(path: file_path)
-            XCTAssertNotNil(la)
-            guard var la = la else { return }
+        func readFile() {
+            guard let la = LargeArray(path: file_path) else { XCTFail("LargeArray init failed"); return }
 //            XCTAssertEqual(la._currentPage._nodes.count, numElements)
 //            for i in 0..<numElements {
 //                la._currentPage._nodes[i].dump()
 //            }
             for i in stride(from: 0, to: numElements, by: 100) {
-                let node = try la.getNodeFor(position: i)
+                let node = try? la.getNodeFor(position: i)
+                XCTAssertNotNil(node)
 //                print("Index: \(i): \(node), \(la._currentPage)")
-                print("Position: \(i): \(node)")
+                print("Position: \(i): \(node!)")
             }
             for i in 0..<numElements {
                 la[i].forEach{XCTAssertEqual($0, UInt8(i % 128))}
@@ -85,31 +83,29 @@ final class LargeArrayTests: XCTestCase {
             la[0] = Data(repeating: 19, count: 19)
             XCTAssertEqual(la[0].count, 19)
             print(la)
-            print(try la.indexPagesInfo())
+            print(try! la.indexPagesInfo() )
 //            print(MemoryLayout<Node>.description)
 //            print(la._currentPage._nodes[10000].reserved)
-        } catch {
-            print(error)
         }
+        readFile()
     }
     ///
     func testAppendManyNodeToArrayPerformance() {
         let numElements = 1024*10
-        do {
-            let la = LargeArray(path: file_path)
-            XCTAssertNotNil(la)
-            guard let la = la else { return }
-            measure {
-                do {
-                    for i in 0..<numElements {
-                        XCTAssertNoThrow( try la.append(Data(repeating: UInt8(i % 128), count: Int.random(in: 100..<2000))))
-                    }
-                } catch {
-                    XCTFail()
+        let la = LargeArray(path: file_path)
+        XCTAssertNotNil(la)
+        guard let la = la else { return }
+        measure {
+            do {
+                for i in 0..<numElements {
+                    try la.append(Data(repeating: UInt8(i % 128), count: Int.random(in: 100..<2000)))
                 }
+            } catch {
+                print(error)
+                XCTFail()
             }
-            print(la)
-        } catch {}
+        }
+        print(la)
     }
     ///
     func testTraverseAllElementsInArrayPerformance() {
@@ -143,16 +139,16 @@ final class LargeArrayTests: XCTestCase {
             let la = LargeArray(path: file_path)
             XCTAssertNotNil(la)
             guard let la = la else { return }
-            for i in 0..<numElements { try la.append(Data(repeating: 1, count: 100)) }
+            for _ in 0..<numElements { try la.append(Data(repeating: 1, count: 100)) }
             la[1024] = Data(repeating: 2, count: 100)
             for i in 1024..<2048 { la[i] = Data(repeating: 2, count: 100) }
             print(la)
-            la[1024].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 2) } }
+            la[1024].forEach { XCTAssertEqual($0, 2) }
             // remove all elements from the second pate
             XCTAssertNoThrow(try la.removeSubrange(1024..<2048))
-            la[1024].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } }
-            la[0].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } }
-            la.forEach { d in d.withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } } }
+            la[1024].forEach { XCTAssertEqual($0, 1) }
+            la[0].forEach { XCTAssertEqual($0, 1) }
+            la.forEach { $0.forEach { XCTAssertEqual($0, 1) } }
             print(la)
             for (k,v) in try la.indexPagesInfo().enumerated() {
                 print(k, v)
@@ -165,16 +161,16 @@ final class LargeArrayTests: XCTestCase {
             let la = LargeArray(path: file_path)
             XCTAssertNotNil(la)
             guard let la = la else { return }
-            for i in 0..<numElements { try la.append(Data(repeating: 1, count: 100)) }
+            for _ in 0..<numElements { try la.append(Data(repeating: 1, count: 100)) }
             la[2048] = Data(repeating: 2, count: 100)
             for i in 2048..<3072 { la[i] = Data(repeating: 2, count: 100) }
             print(la)
-            la[2048].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 2) } }
+            la[2048].forEach { XCTAssertEqual($0, 2) }
             // remove all elements from the second pate
             XCTAssertNoThrow(try la.removeSubrange(2048..<3072))
-            la[1024].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } }
-            la[0].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } }
-            la.forEach { d in d.withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } } }
+            la[1024].forEach { XCTAssertEqual($0, 1) }
+            la[0].forEach { XCTAssertEqual($0, 1) }
+            la.forEach { $0.forEach { XCTAssertEqual($0, 1) } }
             print(la)
             for (k,v) in try la.indexPagesInfo().enumerated() {
                 print(k, v)
@@ -187,16 +183,16 @@ final class LargeArrayTests: XCTestCase {
             let la = LargeArray(path: file_path)
             XCTAssertNotNil(la)
             guard let la = la else { return }
-            for i in 0..<numElements { try la.append(Data(repeating: 1, count: 100)) }
+            for _ in 0..<numElements { try la.append(Data(repeating: 1, count: 100)) }
             la[0] = Data(repeating: 2, count: 100)
             for i in 0..<1024 { la[i] = Data(repeating: 2, count: 100) }
             print(la)
-            la[0].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 2) } }
+            la[0].forEach { XCTAssertEqual($0, 2) }
             // remove all elements from the second page
             XCTAssertNoThrow(try la.removeSubrange(0..<1024))
-            la[1024].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } }
-            la[0].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } }
-            la.forEach { d in d.withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } } }
+            la[1024].forEach { XCTAssertEqual($0, 1) }
+            la[0].forEach { XCTAssertEqual($0, 1) }
+            la.forEach { $0.forEach { XCTAssertEqual($0, 1) }}
             print(la)
             for (k,v) in try la.indexPagesInfo().enumerated() {
                 print(k, v)
@@ -205,7 +201,6 @@ final class LargeArrayTests: XCTestCase {
     }
     func testRemoveElements_PagePartial() {
         let maxPerPage = 1024
-        let elementsCount = 1024//*1024*10
         let elementSize = 100
         do {
             let la = LargeArray(path: file_path, maxPerPage: maxPerPage)
@@ -215,17 +210,14 @@ final class LargeArrayTests: XCTestCase {
                 let d = Data(repeating: UInt8(i), count: elementSize)
                 for _ in 0..<1024 { try la.append(d) }
             }
-//            let d = Data(repeating: UInt8(9), count: elementSize)
-//            for _ in 0..<elementsCount { try la.append(d) }
             print(la)
             XCTAssertNoThrow(try la.removeSubrange(2048+100..<3072)) // remove elements from the third page
             XCTAssertNoThrow(try la.removeSubrange(1024+100..<2048)) // remove elements from the second page
             XCTAssertNoThrow(try la.removeSubrange(0+100..<1024)) // remove elements from the first page
-//            XCTAssertNoThrow(try la.removeSubrange(1024*500..<la.endIndex)) // remove elements from the first page
 
-            for i in 0..<100 { la[i].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 1) } } }
-            for i in 100..<200 { la[i].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 2) } } }
-            for i in 200..<300 { la[i].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 3) } } }
+            for i in 0..<100 { la[i].forEach { XCTAssertEqual($0, 1) }}
+            for i in 100..<200 { la[i].forEach { XCTAssertEqual($0, 2) }}
+            for i in 200..<300 { la[i].forEach { XCTAssertEqual($0, 3) }}
 
             print(la)
             print("Used count: \(la.totalUsedBytesCount), Free count: \(la.totalFreeBytesCount)")
@@ -276,10 +268,10 @@ final class LargeArrayTests: XCTestCase {
                 for _ in 0..<1024 { try la.append(Data(repeating: UInt8(i), count: 100)) }
             }
             print(la)
-            try la.insert(Data(repeating: 4, count: 100), at: 1024)
-            la[1024].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 4) } }
-            try la.insert(Data(repeating: 3, count: 100), at: 1023)
-            la[1023].withUnsafeBytes { p in p.bindMemory(to: UInt8.self).forEach { XCTAssertEqual($0, 3) } }
+            XCTAssertNoThrow(try la.insert(Data(repeating: 4, count: 100), at: 1024))
+            la[1024].forEach{XCTAssertEqual($0, 4)}
+            XCTAssertNoThrow(try la.insert(Data(repeating: 3, count: 100), at: 1023))
+            la[1023].forEach{XCTAssertEqual($0, 3)}
             print(la)
             for (k,v) in try la.indexPagesInfo().enumerated() {
                 print(k, v)

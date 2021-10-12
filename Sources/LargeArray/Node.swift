@@ -38,7 +38,7 @@ extension Node {
     func store(using fileHandle: FileHandle, at address: Address) throws {
         try fileHandle.write(_store(from: self), at: address)
     }
-    func loadData(using fileHandle: FileHandle) throws -> (Data, Allocator.Chunks) {
+    func loadData(using fileHandle: FileHandle) throws -> Data {
         return try Data.loadFromNodes(start: self.chunk_address, byteCount: self.used, using: fileHandle)
     }
     func getChunksForData(using fileHandle: FileHandle) throws -> Allocator.Chunks {
@@ -52,6 +52,18 @@ extension Node {
         }
         return chunks
     }
+    /// Read the Chunks from storage and deallocate them using the allocator
+    static func deallocate(start address: Address, using storage: StorageSystem) throws {
+        var n = Node()
+        var loadAddress = address
+        while loadAddress != Address.max {
+            try n.load(using: storage.fileHandle, from: loadAddress)
+            storage.allocator.deallocate(Allocator.Chunk(address: loadAddress, count: n.reserved))
+            // TODO: Invalidate the stored chunk???
+            //   Overwrite the address with Int.max
+            loadAddress = n.chunk_address
+        }
+    }
 }
 
 extension Node: CustomStringConvertible {
@@ -62,16 +74,31 @@ extension Node: CustomStringConvertible {
 
 @available(macOS 10.15.4, *)
 extension Data {
+    /// Update the nodes used data starting at startNodeAddress
+    func update(startNodeAddress: Address, using fileHandle: FileHandle) throws {
+        var updateAddress = startNodeAddress
+        try self.withUnsafeBytes { buffer in
+            var n = Node()
+            var bufPosition = 0
+            while updateAddress != Int.max {
+                try n.load(using: fileHandle, from: updateAddress)
+                guard (bufPosition + n.used) <= buffer.count else { throw LAErrors.InvalidAllocatedSize }
+                try buffer.baseAddress!.store(fromOffset: bufPosition, byteCount: n.used, using: fileHandle)
+                bufPosition += n.used
+                updateAddress = n.chunk_address
+            }
+        }
+    }
     func storeWithNodes(chunks: Allocator.Chunks, using fileHandle: FileHandle) throws {
-        guard ((self.count + chunks.count * MemoryLayout<Node>.size) <= chunks.allocatedCount) else { throw LAErrors.InvlaidAllocatedSize }
+        guard ((self.count + chunks.count * MemoryLayout<Node>.size) <= chunks.allocatedCount) else { throw LAErrors.InvalidAllocatedSize }
         try self.withUnsafeBytes { buffer in
             var bufPosition = 0
             let overhead = MemoryLayout<Node>.size
             for i in 0..<chunks.count {
                 // Store info about this chunk
                 let nextChunkAddress = (i+1 < chunks.count) ? chunks[i+1].address: Int.max
-                let usedCount = Swift.min(self.count - bufPosition, chunks[i].count - overhead)
-                guard usedCount > 0 else { throw LAErrors.InvlaidAllocatedSize }
+                let usedCount = Swift.min(buffer.count - bufPosition, chunks[i].count - overhead)
+                guard usedCount > 0 else { throw LAErrors.InvalidAllocatedSize }
                 try Node(chunk_address: nextChunkAddress, used: usedCount, reserved: chunks[i].count)
                     .store(using: fileHandle, at: chunks[i].address)
                 // This is a nasty case from const to mutable. It is done only to avoid copying data when saving to file.
@@ -80,10 +107,9 @@ extension Data {
             }
         }
     }
-    static func loadFromNodes(start address: Address, byteCount: Int, using fileHandle: FileHandle) throws -> (Data,Allocator.Chunks) {
+    static func loadFromNodes(start address: Address, byteCount: Int, using fileHandle: FileHandle) throws -> Data {
 //        var data = Data(repeating: 0, count: byteCount)
         var data = Data(capacity: byteCount)
-        var chunks = Allocator.Chunks()
         var n = Node()
         var loadAddress = address
 //        try data.withUnsafeMutableBytes { buffer in
@@ -92,24 +118,21 @@ extension Data {
         //  Data
         // Where the Node.used is the size of the data
         while loadAddress != Address.max {
-            guard loadAddress != Address.max else { throw LAErrors.InvlaidNodeAddress }
             try n.load(using: fileHandle, from: loadAddress)
             if data.count < byteCount {
-                guard n.used > 0 else { throw LAErrors.InvlaidAllocatedSize }
+                guard n.used > 0 else { throw LAErrors.InvalidAllocatedSize }
                 let toRead = Swift.min(n.used, byteCount - data.count)
                 guard let chunkData = try fileHandle.read(bytesCount: toRead) else { throw LAErrors.ErrorReadingData }
                 data += chunkData
             }
-            chunks.append(Allocator.Chunk(address: loadAddress, count: n.reserved))
             loadAddress = n.chunk_address
         }
 //        }
-        return (data, chunks)
+        return data
     }
-    static func loadFromNodes(start address: Address, using fileHandle: FileHandle) throws -> (Data,Allocator.Chunks) {
+    static func loadFromNodes(start address: Address, using fileHandle: FileHandle) throws -> Data {
         //        var data = Data(repeating: 0, count: byteCount)
         var data = Data()
-        var chunks = Allocator.Chunks()
         var n = Node()
         var loadAddress = address
         //        try data.withUnsafeMutableBytes { buffer in
@@ -119,13 +142,12 @@ extension Data {
         // Where the Node.used is the size of the data
         while loadAddress != Address.max {
             try n.load(using: fileHandle, from: loadAddress)
-            guard n.used > 0 else { throw LAErrors.InvlaidAllocatedSize }
+            guard n.used > 0 else { throw LAErrors.InvalidAllocatedSize }
             guard let chunkData = try fileHandle.read(bytesCount: n.used) else { throw LAErrors.ErrorReadingData }
-            chunks.append(Allocator.Chunk(address: loadAddress, count: n.reserved))
             data += chunkData
             loadAddress = n.chunk_address
         }
         //        }
-        return (data, chunks)
+        return data
     }
 }

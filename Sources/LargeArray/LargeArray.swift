@@ -60,30 +60,17 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
     }
     ///
     private var totalCount: Index {
-        get {
-            _header._count
-        }
-        set {
-            if newValue < 0 { fatalError("Invalid array count.") }
-            _header._count = newValue
-        }
+        get { _header._count }
+        set { if newValue < 0 { fatalError("Invalid array count.") }
+              _header._count = newValue }
     }
     private var totalUsedCount: Address {
-        get {
-            return _header._totalUsedBytesCount
-        }
-        set {
-//            if newValue < 0 { }
-            _header._totalUsedBytesCount = newValue
-        }
+        get { _header._totalUsedBytesCount }
+        set { _header._totalUsedBytesCount = newValue }
     }
     ///
-    public var totalUsedBytesCount: Address {
-        return _header._totalUsedBytesCount
-    }
-    public var totalFreeBytesCount: Int {
-        return _storage.allocator.freeByteCount
-    }
+    public var totalUsedBytesCount: Address { _header._totalUsedBytesCount }
+    public var totalFreeBytesCount: Int { _storage.allocator.freeByteCount }
     ///
     init(start root: Address, maxPerPage: Index, fileHandle: FileHandle, capacity: Int = Int.max) throws {
         _storage = StorageSystem(fileHandle: fileHandle,
@@ -106,7 +93,6 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
             _storage.allocator = try Allocator.load(using: _storage, from: _header._freeRoot)
             
             try _currentPage = IndexPage(address: _header._startPageAddress, using: _storage)
-            try _currentPage.load(from: _header._startPageAddress)
 //            guard _header._startPageAddress == _currentPage.pageAddress else { throw LAErrors.CorruptedPageAddress }
             // TODO: Better verification that the data is correct
             return
@@ -120,9 +106,9 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
         }
 
         _currentPage = try IndexPage(maxNodes: _maxElementsPerPage, using: _storage)
+        try _currentPage.store()
         _header._startPageAddress = _currentPage.pageAddress
-//        try storeHeader()
-//        try _currentPage.store()
+        try storeHeader()
     }
     ///
     public convenience init?(path: String, capacity: Int = Address.max, maxPerPage: Index = 1024) {
@@ -142,27 +128,27 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
     ///
     deinit {
         do {
-            if _dirty {
+            if _dirty || _header._freeRoot == Int.max {
+                try _currentPage.store()
                 _header._freeRoot = try _storage.allocator.store(using: _storage)
                 try storeHeader()
-                try _currentPage.store()
             }
         } catch {
             /// Hmmm. Exception in deinit. Not good.
         }
-//        if _fileHandle.
+
         try! _storage.fileHandle.close()
     }
     ///
     func storeHeader() throws {
-        try _storage.fileHandle.seek(toOffset: UInt64(_rootAddress))
-        try _storage.fileHandle.write(contentsOf: _store(from: _header))
+//        try _storage.fileHandle.seek(toOffset: UInt64(_rootAddress))
+        try _storage.fileHandle.write(_store(from: _header), at: _rootAddress)
     }
     ///
     func createNode(with data: Data) throws -> Node {
         // Store the data and create a node to point to it.
         let overhead = MemoryLayout<Node>.size
-        guard let allocated = _storage.allocator.allocate(data.count, overhead: overhead) else { throw LAErrors.AllocationFailed}
+        guard let allocated = _storage.allocator.allocate(data.count, overhead: overhead) else { throw LAErrors.AllocationFailed }
         let node = Node(chunk_address: allocated[0].address, used: data.count, reserved: data.count)
         try data.storeWithNodes(chunks: allocated, using: _storage.fileHandle)
         _dirty = true
@@ -191,7 +177,7 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
         }
     }
     func getNodeData(_ node: Node) throws -> Data {
-        return try node.loadData(using: _storage.fileHandle).0
+        return try node.loadData(using: _storage.fileHandle)
     }
     ///
     /*mutating*/
@@ -334,8 +320,8 @@ extension LargeArray {
         var pageAddress = _header._startPageAddress
         while pageAddress != Address.invalid {
             let page = try PageInfo.load(using: _storage, at: pageAddress)
-            infos.append(page.0)
-            pageAddress = page.0.next
+            infos.append(page)
+            pageAddress = page.next
         }
         return infos
     }
@@ -371,10 +357,11 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
                     let node = try getNodeFor(position: position)
                     if node.used != newValue.count {
                         // Deallocate the existing node data - such that it is available for reuse
-                        try _storage.allocator.deallocate(chunks: node.getChunksForData(using: _storage.fileHandle))
+                        try Node.deallocate(start: node.chunk_address, using: _storage)
+//                        try _storage.allocator.deallocate(chunks: node.getChunksForData(using: _storage.fileHandle))
                         // Create a new node
                         let newNode = try createNode(with: newValue)
-                        _currentPage.updateNode(at: indexRelativeToCurrentPage(position), node: newNode)
+                        _currentPage.updateNode(at: indexRelativeToCurrentPage(position), with: newNode)
                     } else {
                         try updateNodeData(node, contentsOf: newValue)
                     }
@@ -404,7 +391,8 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
     public func remove(at position: Index) throws {
         try autoreleasepool {
             let node = try getNodeFor(position: position)
-            try _storage.allocator.deallocate(chunks: node.getChunksForData(using: _storage.fileHandle))
+            try Node.deallocate(start: node.chunk_address, using: _storage)
+//            try _storage.allocator.deallocate(chunks: node.getChunksForData(using: _storage.fileHandle))
             _currentPage.removeNode(at: indexRelativeToCurrentPage(position))
             
 //            try _currentPage.store(using: _fileHandle) // store All ... perhaps later???
@@ -506,7 +494,7 @@ extension UnsafeRawPointer {
 extension Allocator {
     /// Load the allocator state fron the StorageSystem
     static func load(using storage: StorageSystem, from address: Address) throws -> Allocator {
-        return try JSONDecoder().decode(Allocator.self, from: Data.loadFromNodes(start: address, using: storage.fileHandle).0)
+        return try JSONDecoder().decode(Allocator.self, from: Data.loadFromNodes(start: address, using: storage.fileHandle))
     }
     /// Store the allocator state to the storage system
     /// 1) Capture the current state of the Allocator.
