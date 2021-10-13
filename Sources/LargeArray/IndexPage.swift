@@ -25,10 +25,16 @@ struct IndexPage {
     enum Properties {
         case All, Info, Nodes
     }
+    enum NodeMoveLocation {
+        case ToFront(Range<Int>)
+        case ToBack(Range<Int>)
+    }
     struct Dirty: Codable {
         var info: Bool = false
         var nodes: Bool = false
         var isDirty: Bool { info || nodes }
+        init(_ dirty: Bool = false) { info = dirty; nodes = dirty}
+        init(info: Bool, nodes: Bool) { self.info = info; self.nodes = nodes}
     }
     //
     private var _info: PageInfo
@@ -108,6 +114,64 @@ struct IndexPage {
         _dirty = Dirty()
         _infoAddress = Int.max
     }
+    /// Either move some the nodes from this page to the next, or create a new page and then move some
+    /// of the nodes from this page into the new one.
+    ///
+    ///
+    mutating func ensurePageHasFreeSpace() throws {
+        guard isFull else { return }
+        // Ensure nodes are loaded so we can move them to another page.
+        if _nodes.isEmpty {
+            try _loadNodes()
+        }
+        
+        if self._info.next != Address.invalid {
+            // move some of the nodes from the current page to the next, if that is possible.
+            // Otherwise create a new page and split the nodes between the current and the new page.
+            var nextPage = try IndexPage(address: self._info.next, using: _storage)
+            if nextPage.info.availableNodes < nextPage.info.maxNodes/2 {
+                try nextPage.load(from: nextPage.pageAddress, what: .Nodes)
+                let elementsCount = nextPage.info.maxNodes/2
+                try self.moveNodes(NodeMoveLocation.ToFront(self._info.availableNodes-elementsCount..<self._info.availableNodes),
+                                   into: &nextPage)
+                try nextPage.store()
+                try self.store()
+            }
+        }
+//        if self.isFull && self._info.prev != Address.invalid {
+//            var prevPage = try IndexPage(address: self._info.prev, using: _storage)
+//            if prevPage._info.availableNodes < prevPage._info.maxNodes/2 {
+//                try prevPage.load(from: prevPage.pageAddress, what: .Nodes)
+//                let elementsCount = prevPage._info.maxNodes/2
+//                try self.moveNodes(NodeMoveLocation.ToBack(0..<self._info.availableNodes-elementsCount),
+//                                   into: &prevPage)
+//                try prevPage.store()
+//                try self.store()
+//            }
+//        }
+        if self.isFull {
+            try splitPage()
+        }
+//        _dirty = Dirty(true)
+    }
+    mutating func splitPage() throws {
+        var newPage = try IndexPage(maxNodes: _info.maxNodes, using: _storage)
+        newPage.info.prev = self.pageAddress
+        newPage.info.next = self._info.next
+        // Update the _curPage.info._next page to point to the newPage.
+        if self._info.next != Address.invalid {
+            var pageToUpdate = try IndexPage(address: self._info.next, using: _storage)
+            pageToUpdate.info.prev = newPage.pageAddress
+            try pageToUpdate.store()
+        }
+        // now, link the current page with the split (new) page
+        self.info.next = newPage.pageAddress
+        // Move half of the nodes to the new page and save it
+        try self.moveNodes(NodeMoveLocation.ToFront(self._info.availableNodes/2..<self._info.availableNodes),
+                                                    into: &newPage)
+        try newPage.store()
+        try self.store()
+    }
     ///
     mutating func appendNode(_ node: Node) throws {
         guard isFull == false else { throw LAErrors.NodeIsFull }
@@ -138,15 +202,18 @@ struct IndexPage {
         return _nodes[position]
     }
     ///
-    mutating func moveNodes(_ range: Range<Int>, into outPage: inout IndexPage) throws {
-        outPage._nodes = _nodes[range] + outPage._nodes
+    mutating func moveNodes(_ location: NodeMoveLocation, into outPage: inout IndexPage) throws {
+        switch location {
+        case .ToBack(let range):
+            outPage._nodes += _nodes[range]
+            _nodes.removeSubrange(range)
+        case .ToFront(let range):
+            outPage._nodes = _nodes[range] + outPage._nodes
+            _nodes.removeSubrange(range)
+        }
         outPage._info.availableNodes = outPage._nodes.count
-        
-//        for i in range {
-//            try page.appendNode(node(at: i))
-//        }
-        _nodes.removeSubrange(range)
-        _info.availableNodes = _nodes.count
+            
+        info.availableNodes = _nodes.count
         _dirty.nodes = true
     }
     ///

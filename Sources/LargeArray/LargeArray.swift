@@ -169,9 +169,6 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
                 try n.store(using: _storage.fileHandle, at: nodeAddress)
             }
             try buffer.baseAddress!.store(fromOffset: bufPosition, byteCount: usedCount, using: _storage.fileHandle)
-//            guard let srcPtr = UnsafeMutableRawPointer(bitPattern: Int(bitPattern: buffer.baseAddress!.advanced(by: bufPosition))) else { throw LAErrors.ErrorConstructingSourcePointer }
-//            let chunkData = Data(bytesNoCopy: srcPtr, count: usedCount, deallocator: .none)
-//            try _fileHandle.write(chunkData)
             bufPosition += usedCount
             nodeAddress = n.chunk_address
         }
@@ -196,43 +193,6 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
         _dirty = true
     }
     ///
-    func provideSpaceInCurrentPage() throws {
-        if _currentPage.info.next != Address.invalid {
-            // move some of the nodes from the current page to the next, if that is possible.
-            // Otherwise create a new page and split the nodes between the current and the new page.
-            var nextPage = try IndexPage(address: _currentPage.info.next, using: _storage)
-            if nextPage.info.availableNodes < nextPage.info.maxNodes/2 {
-                try nextPage.load(from: nextPage.pageAddress, what: .Nodes)
-                let elementsCount = nextPage.info.maxNodes/2
-                try _currentPage.moveNodes((_currentPage.info.availableNodes-elementsCount..<_currentPage.info.availableNodes), into: &nextPage)
-                try nextPage.store()
-                try _currentPage.store()
-            }
-        }
-        if _currentPage.isFull {
-            try splitCurrentPage()
-        }
-        _dirty = true
-    }
-    ///
-    func splitCurrentPage() throws {
-        var newPage = try IndexPage(maxNodes: _maxElementsPerPage, using: _storage)
-        newPage.info.prev = _currentPage.pageAddress
-        newPage.info.next = _currentPage.info.next
-        // Update the _curPage.info._next page to point to the newPage.
-        if _currentPage.info.next != Address.invalid {
-            var pageToUpdate = try IndexPage(address: _currentPage.info.next, using: _storage)
-            pageToUpdate.info.prev = newPage.pageAddress
-            try pageToUpdate.store()
-        }
-        // now, link the current page with the split (new) page
-        _currentPage.info.next = newPage.pageAddress
-        // Move half of the nodes to the new page and save it
-        try _currentPage.moveNodes(_currentPage.info.availableNodes/2..<_currentPage.info.availableNodes, into: &newPage)
-        try newPage.store()
-        try _currentPage.store()
-    }
-    ///
     @inlinable
     func indexRelativeToCurrentPage(_ position: Index) -> Index {
         return position - _currentPage_startIndex
@@ -245,19 +205,31 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
     func findPageForInsertion(position: Index) throws {
         var startPos = _currentPage_startIndex
         var range = (startPos...startPos + _currentPage.info.availableNodes)
-        guard range.contains(position) == false else { return  }
-        try _currentPage.store()
-        let direction = position > range.upperBound ? WalkDirection.Down: WalkDirection.Up
-        while range.contains(position) == false {
-            let address = (direction == .Up) ? _currentPage.info.prev : _currentPage.info.next
-            guard address != Address.invalid else { throw LAErrors.PositionOutOfRange }
-            if direction == .Down { startPos += _currentPage.info.availableNodes }
-            try _currentPage.load(from: address)
-            if direction == .Up { startPos -= _currentPage.info.availableNodes }
-            range = (startPos...startPos+_currentPage.info.availableNodes)
+        if range.contains(position) == false {
+            try _currentPage.store()
+            var pageInfo = _currentPage.info
+            var pageAddress = _currentPage.pageAddress
+            let direction = position > range.upperBound ? WalkDirection.Down: WalkDirection.Up
+            while range.contains(position) == false {
+                pageAddress = (direction == .Up) ? pageInfo.prev : pageInfo.next
+                guard pageAddress != Address.invalid else { throw LAErrors.PositionOutOfRange }
+                if direction == .Down { startPos += pageInfo.availableNodes }
+                try pageInfo = PageInfo.load(using: _storage, at: pageAddress)
+//                try _currentPage.load(from: address, what: .Info)
+                if direction == .Up { startPos -= pageInfo.availableNodes }
+                range = (startPos...startPos+pageInfo.availableNodes)
+            }
+            _currentPage_startIndex = startPos
+            if _currentPage.pageAddress != pageAddress {
+                try _currentPage.load(from: pageAddress)
+            }
         }
-        _currentPage_startIndex = startPos
-        try _currentPage.load(from: _currentPage.pageAddress, what: .Nodes)
+        if _currentPage.isFull {
+            try _currentPage.ensurePageHasFreeSpace()
+            try findPageForInsertion(position: position)
+            return
+        }
+//        try _currentPage.load(from: _currentPage.pageAddress, what: .Nodes)
     }
     ///
     func findPageForAccess(position: Index) throws {
@@ -414,11 +386,6 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
             // If the pate is full - then split it in a half (creating two linked pages) and insert the new
             // element into one of those pages.
             try findPageForInsertion(position: position)
-            if _currentPage.isFull {
-                // Split into two pages and then insert the item into one of them.
-                try provideSpaceInCurrentPage()
-                try findPageForInsertion(position: position)
-            }
             try _currentPage.insertNode(createNode(with: element), at: indexRelativeToCurrentPage(position))
             totalCount += 1
             totalUsedCount += element.count
@@ -429,7 +396,8 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
     }
     /// Append a node. The Data associated with the Node is not moved or copied.
     func appendNode(_ node: Node) throws {
-        try findPageForInsertion(position: _header._count)
+//        try _currentPage.ensurePageHasFreeSpace()
+//        try findPageForInsertion(position: _header._count)
         if _currentPage.isFull {
             try createNewCurrentPage()
         }
