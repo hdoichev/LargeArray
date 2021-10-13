@@ -48,6 +48,7 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
 
     var _storage: StorageSystem
     let _rootAddress: Address
+    @usableFromInline
     var _header: Header
     let _maxElementsPerPage: Index
     var _currentPage: IndexPage
@@ -187,7 +188,7 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
         _currentPage.info.next = newPage.pageAddress
         try _currentPage.store()
         // Last: Set the new page as the current page and update related properties.
-        _currentPage_startIndex = _currentPage_startIndex + Index(_currentPage.info.availableNodes)
+        _currentPage_startIndex = _currentPage_startIndex + _currentPage.info.availableNodes
         _currentPage = newPage
         
         _dirty = true
@@ -264,14 +265,20 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
             return
         }
         guard _currentPage.info.next != Address.max || _currentPage.info.prev != Address.max else { return }
-                
         if _currentPage.info.availableNodes == 0 {
 //            try _currentPage.store()
-           
+            let updateHeaderStartPageAddress = (_currentPage.pageAddress == _header._startPageAddress)
+            if updateHeaderStartPageAddress {
+                print("Dohhhhhhhh")
+            }
+
             let nextAddress = _currentPage.info.next
             let prevAddress = _currentPage.info.prev
             try _currentPage.deallocate()
             if nextAddress != Address.max {
+                if updateHeaderStartPageAddress {
+                    _header._startPageAddress = nextAddress
+                }
                 // load the prev page as _current
                 try _currentPage.load(from: nextAddress)
             } else {
@@ -300,11 +307,51 @@ extension LargeArray {
 }
 
 @available(macOS 10.15.4, *)
+extension LargeArray {
+    public func coalescePages() throws {
+        var pageInfo = try PageInfo.load(using: _storage, at: _header._startPageAddress)
+        var lastPageInfo = pageInfo
+        var totalAllocatedNodesCount = 0
+        var totalUsedNodesCount = 0
+        var totalMovedNodesCount = 0
+        var totalPagesDeallocated = 0
+        while pageInfo.nodes_address != Address.invalid {
+            if lastPageInfo.isFull {
+                lastPageInfo = pageInfo
+            }
+            totalAllocatedNodesCount += pageInfo.maxNodes
+            totalUsedNodesCount += pageInfo.availableNodes
+            guard pageInfo.next != Address.invalid else { break }
+            pageInfo = try PageInfo.load(using: _storage, at: pageInfo.next)
+            if lastPageInfo.isFull == false {
+                // move nodes to the last page
+                let nodesToMove = Swift.min(pageInfo.availableNodes, lastPageInfo.freeSpaceCount)
+                totalUsedNodesCount += nodesToMove
+                totalMovedNodesCount += nodesToMove
+                lastPageInfo.availableNodes += nodesToMove
+                pageInfo.availableNodes -= nodesToMove
+                if lastPageInfo.isFull == false {
+                    // release the current pageInfo?
+                    totalPagesDeallocated += 1
+                } else {
+                    // The current page still has nodes in it, so it can not be deallocated.
+                    // Instead it will be used to coalesce nodes from other pages.
+                }
+            }
+        }
+        print("TotalAllocated: ", totalAllocatedNodesCount,
+              "TotalUsed: ", totalUsedNodesCount,
+              "TotalMoved: ", totalMovedNodesCount,
+              "TotalDeallocated: ", totalPagesDeallocated)
+    }
+}
+
+@available(macOS 10.15.4, *)
 extension LargeArray: MutableCollection, RandomAccessCollection {
     @inlinable public var startIndex: Index {
         return 0
     }
-//    @inlinable
+    @inlinable
     public var endIndex: Index {
         return _header._count
     }

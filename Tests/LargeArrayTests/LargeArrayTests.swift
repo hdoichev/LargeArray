@@ -153,6 +153,7 @@ final class LargeArrayTests: XCTestCase {
             for (k,v) in try la.indexPagesInfo().enumerated() {
                 print(k, v)
             }
+            try la.coalescePages()
         } catch {}
     }
     func testRemoveElements_PageLast() {
@@ -197,6 +198,7 @@ final class LargeArrayTests: XCTestCase {
             for (k,v) in try la.indexPagesInfo().enumerated() {
                 print(k, v)
             }
+            try la.coalescePages()
         } catch {}
     }
     func testRemoveElements_PagePartial() {
@@ -256,6 +258,7 @@ final class LargeArrayTests: XCTestCase {
             for (k,v) in try la.indexPagesInfo().enumerated() {
                 print(k, v)
             }
+            try la.coalescePages()
         } catch {}
     }
     ///
@@ -276,6 +279,7 @@ final class LargeArrayTests: XCTestCase {
             for (k,v) in try la.indexPagesInfo().enumerated() {
                 print(k, v)
             }
+            try la.coalescePages()
         } catch {
             XCTFail()
         }

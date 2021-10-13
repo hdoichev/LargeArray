@@ -18,7 +18,11 @@ public struct PageInfo: Codable {
     var next: Address = Address.max
     var prev: Address = Address.max
 }
-
+@available(macOS 10.15.4, *)
+extension PageInfo {
+    public var isFull: Bool { availableNodes >= maxNodes }
+    public var freeSpaceCount: Int { return maxNodes - availableNodes }
+}
 ///
 @available(macOS 10.15.4, *)
 struct IndexPage {
@@ -52,15 +56,9 @@ struct IndexPage {
             }
         }
     }
-    var dirty: Dirty {
-        _dirty
-    }
-    var isFull: Bool {
-        return _info.availableNodes >= _info.maxNodes 
-    }
-    var pageAddress: Address {
-        return _infoAddress //[0].address
-    }
+    var dirty: Dirty { _dirty }
+    var isFull: Bool { _info.isFull }
+    var pageAddress: Address { _infoAddress }
     ///
     init() {
         _infoAddress = Int.max

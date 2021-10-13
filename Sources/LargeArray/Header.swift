@@ -9,8 +9,9 @@ import Foundation
 
 ///
 public let _LA_VERSION: Int = 1
-struct Header: Codable {
+public struct Header: Codable {
     let _version: Int
+    @usableFromInline
     var _count: Int /// Total number of lelements in the Array
     var _totalUsedBytesCount: Address
     var _startPageAddress: Address
@@ -27,7 +28,7 @@ extension Header {
 }
 ///
 extension Header: CustomStringConvertible {
-    var description: String {
+    public var description: String {
         "\(Header.self): version: \(_version), count: \(_count), totalUsedBytesCount: \(_totalUsedBytesCount), startPageAddress: \(_startPageAddress), freeRoot: \(_freeRoot)"
     }
 }
