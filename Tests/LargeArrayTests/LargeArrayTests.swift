@@ -327,4 +327,43 @@ final class LargeArrayTests: XCTestCase {
             XCTFail()
         }
     }
+    ///
+    func test_ScalerValues() {
+        do {
+            let elementsCount = 1*1024
+            let la = LargeArray(path: file_path)
+            XCTAssertNotNil(la)
+            guard let la = la else { return }
+            // Ints
+            for i in 0..<elementsCount { try autoreleasepool { try la.append(i) } }
+            for i in 0..<elementsCount {
+                autoreleasepool {
+                    XCTAssertEqual(la[i], i)
+                }
+            }
+            // Floats
+            for i in 0..<elementsCount { try autoreleasepool { try la.append(Float(i*i)) } }
+            for i in 0..<elementsCount {
+                autoreleasepool {
+                    XCTAssertEqual(la[i + 1024], Float(i*i))
+                }
+            }
+            // String
+            for i in 0..<elementsCount { try autoreleasepool { try la.append("\(i+i)") } }
+            for i in 0..<elementsCount {
+                autoreleasepool {
+                    XCTAssertEqual(la[i + 2048], "\(i+i)")
+                }
+            }
+            
+//            let a = la[0..<10]
+//            a.forEach { print($0) }
+            print(la)
+            for (k,v) in try la.indexPagesInfo().enumerated() {
+                print(k, v)
+            }
+        } catch {
+            XCTFail()
+        }
+    }
 }

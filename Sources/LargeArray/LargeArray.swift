@@ -268,9 +268,6 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
         if _currentPage.info.availableNodes == 0 {
 //            try _currentPage.store()
             let updateHeaderStartPageAddress = (_currentPage.pageAddress == _header._startPageAddress)
-            if updateHeaderStartPageAddress {
-                print("Dohhhhhhhh")
-            }
 
             let nextAddress = _currentPage.info.next
             let prevAddress = _currentPage.info.prev
