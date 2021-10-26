@@ -20,13 +20,55 @@ typealias StorageArray = HArray<StorageSystem>
 //    func read(bytesCount: Int) throws -> Data?
 //    func seek(to: Address) throws
 //}
-
+@available(macOS 10.15.4, *)
+class NodesPageCache {
+    struct Cache {
+        var info: PageInfo
+        var nodes: Nodes = Nodes()
+    }
+    var fileHandle: FileHandle
+    var page = Cache(info: PageInfo(), nodes: Nodes())
+    init(_ fileHandle: FileHandle) {
+        self.fileHandle = fileHandle
+    }
+    ///
+    func storeCache() {
+        try? page.nodes.update(to: page.info, using: fileHandle) // TODO: What about error handling???
+    }
+    ///
+    func updateCache(_ pageInfo: PageInfo) {
+        if pageInfo.address != page.info.address {
+            storeCache()
+            page.info = pageInfo
+            guard let nd = try? Data.load(start: page.info.address,
+                                          upTo: MemoryLayout<Node>.size * page.info.count, using: fileHandle) else { fatalError("Failed to load cache for nodes. address:\(page.info.address), itemsCount: \(page.info.count)") }
+            page.nodes = Nodes(repeating: Node(), count: Int(page.info.count))
+            page.nodes.withUnsafeMutableBufferPointer { nd.copyBytes(to: $0) }
+        }
+    }
+    func node(pageInfo: PageInfo, at position: Int) -> Node {
+        updateCache(pageInfo)
+        // Load the nodepage (if required) and return the the Node at position.
+        return page.nodes[position]
+    }
+    func access(pageInfo: PageInfo, block: (inout Nodes)->Void) {
+        updateCache(pageInfo)
+        // Load the nodepage (if required) and return the the Node at position.
+        block(&page.nodes)
+    }
+    func access(node position: Int, pageInfo: PageInfo, block: (inout Node)->Void) {
+        updateCache(pageInfo)
+        // Load the nodepage (if required) and return the the Node at position.
+        block(&page.nodes[position])
+    }
+}
 /// Aggregate all the classes used for storage
+@available(macOS 10.15.4, *)
 struct StorageSystem {
     var fileHandle: FileHandle
     var allocator: Allocator
     var nodeCache: Int
-    var pageCache: Int
+    var pageCache: NodesPageCache
     var maxNodesPerPage: Int
 }
 
@@ -88,7 +130,7 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
         _storage = StorageSystem(fileHandle: fileHandle,
                                  allocator: Allocator(capacity: capacity, start: root + MemoryLayout<Header>.size),
                                  nodeCache: 0,
-                                 pageCache: 0,
+                                 pageCache: NodesPageCache(fileHandle),
                                  maxNodesPerPage: maxPerPage)
         _rootAddress = root
         _header = Header()
@@ -164,21 +206,22 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
     /// Update the data stored in Node.
     /// This function follows the chain of Nodes in order to find all relevant chunks.
     func updateNodeData(_ node: Node, contentsOf data: Data) throws {
-        var nodeAddress = node.chunk_address
-        var n = Node()
-        try data.withUnsafeBytes{ buffer in
-            var bufPosition = 0
-            try n.load(using: _storage.fileHandle, from: nodeAddress)
-            let usedCount = Swift.min(data.count, n.used)
-            if usedCount != n.used {
-                // update the stored node
-                n.used = usedCount
-                try n.store(using: _storage.fileHandle, at: nodeAddress)
-            }
-            try buffer.baseAddress!.store(fromOffset: bufPosition, byteCount: usedCount, using: _storage.fileHandle)
-            bufPosition += usedCount
-            nodeAddress = n.chunk_address
-        }
+        try data.update(startNodeAddress: node.chunk_address, using: _storage.fileHandle)
+//        var nodeAddress = node.chunk_address
+//        var n = Node()
+//        try data.withUnsafeBytes{ buffer in
+//            var bufPosition = 0
+//            try n.load(using: _storage.fileHandle, from: nodeAddress)
+//            let usedCount = Swift.min(data.count, n.used)
+//            if usedCount != n.used {
+//                // update the stored node
+//                n.used = usedCount
+//                try n.store(using: _storage.fileHandle, at: nodeAddress)
+//            }
+//            try buffer.baseAddress!.store(fromOffset: bufPosition, byteCount: usedCount, using: _storage.fileHandle)
+//            bufPosition += usedCount
+//            nodeAddress = n.chunk_address
+//        }
     }
     func getNodeData(_ node: Node) throws -> Data {
         return try node.loadData(using: _storage.fileHandle)
@@ -281,11 +324,6 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
     }
     public func insert<T: Codable>(_ element: T, at position: Index) throws {
         try self.insert(JSONEncoder().encode(element), at: position)
-    }
-    /// Append a node. The Data associated with the Node is not moved or copied.
-    func appendNode(_ node: Node) throws {
-        totalCount += 1
-        totalUsedCount += Address(node.used)
     }
 }
 @available(macOS 10.15.4, *)

@@ -1,5 +1,5 @@
 //
-//  File.swift
+//  Node.swift
 //  
 //
 //  Created by Hristo Doichev on 9/27/21.
@@ -45,7 +45,7 @@ extension Node {
         var chunks = Allocator.Chunks()
         var n = Node()
         var loadAddress = self.chunk_address
-        while loadAddress != Address.max {
+        while loadAddress != Address.invalid {
             try n.load(using: fileHandle, from: loadAddress)
             chunks.append(Allocator.Chunk(address: loadAddress, count: n.reserved))
             loadAddress = n.chunk_address
@@ -56,7 +56,7 @@ extension Node {
     static func deallocate(start address: Address, using storage: StorageSystem) throws {
         var n = Node()
         var loadAddress = address
-        while loadAddress != Address.max {
+        while loadAddress != Address.invalid {
             try n.load(using: storage.fileHandle, from: loadAddress)
             storage.allocator.deallocate(Allocator.Chunk(address: loadAddress, count: n.reserved))
             // TODO: Invalidate the stored chunk???
@@ -117,7 +117,7 @@ extension Data {
         //  Node
         //  Data
         // Where the Node.used is the size of the data
-        while loadAddress != Address.max {
+        while loadAddress != Address.invalid {
             try n.load(using: fileHandle, from: loadAddress)
             if data.count < byteCount {
                 guard n.used > 0 else { throw LAErrors.InvalidAllocatedSize }
@@ -140,7 +140,7 @@ extension Data {
         //  Node
         //  Data
         // Where the Node.used is the size of the data
-        while loadAddress != Address.max {
+        while loadAddress != Address.invalid {
             try n.load(using: fileHandle, from: loadAddress)
             guard n.used > 0 else { throw LAErrors.InvalidAllocatedSize }
             guard let chunkData = try fileHandle.read(bytesCount: n.used) else { throw LAErrors.ErrorReadingData }
