@@ -32,19 +32,19 @@ struct StorageSystem {
 
 @available(macOS 10.15.4, *)
 extension StorageSystem: StorableAllocator {
-    typealias Storage = IndexPage
-    func createStore(capacity: Int) -> IndexPage? {
-        return try? IndexPage(maxNodes: maxNodesPerPage, using: self)
+    typealias Storage = NodesPage
+    func createStore(capacity: Int) -> NodesPage? {
+        return try? NodesPage(maxNodes: maxNodesPerPage, using: self)
     }
 }
 
 ///
 ///  LargeArray structure:
 ///   Header:
-///   IndexPage:
+///   NodesPage:
 ///     Info:
 ///     nodes: ContiguousArray<Node>
-///     --- The Nodes are stored immediately after the IndexPage.Info information ---
+///     --- The Nodes are stored immediately after the NodesPage.Info information ---
 ///
 ///    ... the rest is a mixture of Objects data (which is pointed to by the Nodes) and additional IndexPages
 ///
@@ -246,7 +246,7 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
 //    @inlinable
     public /*mutating*/ func append(_ element: Data) throws {
         try autoreleasepool {
-            // update the IndexPage and store that too??? Or store the IndexPage only after a number of changes have occurred.
+            // update the NodesPage and store that too??? Or store the NodesPage only after a number of changes have occurred.
             try _storageArray.append(createNode(with: element))
         }
     }

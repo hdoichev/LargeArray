@@ -24,7 +24,7 @@ extension PageInfo {
 }
 ///
 @available(macOS 10.15.4, *)
-class IndexPage: Codable {
+class NodesPage: Codable {
     enum Properties {
         case All, Info, Nodes
     }
@@ -149,7 +149,7 @@ class IndexPage: Codable {
 }
 
 @available(macOS 10.15.4, *)
-extension IndexPage: Storable {
+extension NodesPage: Storable {
     typealias StorageAllocator = StorageSystem
     typealias Index = Int
     typealias Element = Node
@@ -202,7 +202,7 @@ extension IndexPage: Storable {
 
 ///     Store and load functionality
 @available(macOS 10.15.4, *)
-extension IndexPage {
+extension NodesPage {
     ///
     func store() throws {
         guard let storage = _storage else { return }
@@ -232,7 +232,7 @@ extension IndexPage {
                 _dirty.info = false
             }
             // Store the nodes into the data buffer
-            // When storing we always store the _maxNodes size. This prevents the relocation of the IndexPage when elements are added/removed from it.
+            // When storing we always store the _maxNodes size. This prevents the relocation of the NodesPage when elements are added/removed from it.
             // When loading the nodes the _availableNodes is used to read the nodes data, thus only the actual stored elements are loaded.
             //        var nodesData = Data(count: MemoryLayout<Node>.size * Int(_info._maxNodes))
             if _dirty.nodes {
@@ -279,7 +279,7 @@ extension IndexPage {
 }
 
 @available(macOS 10.15.4, *)
-extension IndexPage: CustomStringConvertible {
+extension NodesPage: CustomStringConvertible {
     var description: String {
         return """
         Page(Address: \(pageAddress), AvailableNodes: \(_info.availableNodes) (\(_nodes.count))
@@ -289,7 +289,7 @@ extension IndexPage: CustomStringConvertible {
 
 @available(macOS 10.15.4, *)
 extension PageInfo: Equatable {
-//    static func == (lhs: IndexPage.Info, rhs: IndexPage.Info) -> Bool {
+//    static func == (lhs: NodesPage.Info, rhs: NodesPage.Info) -> Bool {
 //        return
 //        (lhs._address == rhs._address &&
 //         lhs._availableNodes == rhs._availableNodes &&
