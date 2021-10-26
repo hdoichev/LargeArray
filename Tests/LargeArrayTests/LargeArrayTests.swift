@@ -44,7 +44,6 @@ final class LargeArrayTests: XCTestCase {
         // read the file
         func readFile() {
             guard let la = LargeArray(path: file_path) else { XCTFail("LargeArray init failed"); return }
-            XCTAssertEqual(la._currentPage.info.availableNodes, 1)
 //            la[0].dump()
         }
         readFile()
@@ -57,21 +56,12 @@ final class LargeArrayTests: XCTestCase {
             for i in 0..<numElements {
                 XCTAssertNoThrow( try la.append(Data(repeating: UInt8(i % 128), count: 10)))
             }
-            print("Nodes.count = \(la._currentPage.info.availableNodes)")
         }
         create()
         // read the file
         func readFile() {
             guard let la = LargeArray(path: file_path) else { XCTFail("LargeArray init failed"); return }
-//            XCTAssertEqual(la._currentPage._nodes.count, numElements)
-//            for i in 0..<numElements {
-//                la._currentPage._nodes[i].dump()
-//            }
             for i in stride(from: 0, to: numElements, by: 100) {
-                let node = try? la.getNodeFor(position: i)
-                XCTAssertNotNil(node)
-//                print("Index: \(i): \(node), \(la._currentPage)")
-                print("Position: \(i): \(node!)")
             }
             for i in 0..<numElements {
                 la[i].forEach{XCTAssertEqual($0, UInt8(i % 128))}
@@ -84,8 +74,6 @@ final class LargeArrayTests: XCTestCase {
             XCTAssertEqual(la[0].count, 19)
             print(la)
             print(try! la.indexPagesInfo() )
-//            print(MemoryLayout<Node>.description)
-//            print(la._currentPage._nodes[10000].reserved)
         }
         readFile()
     }
@@ -153,7 +141,6 @@ final class LargeArrayTests: XCTestCase {
             for (k,v) in try la.indexPagesInfo().enumerated() {
                 print(k, v)
             }
-            try la.coalescePages()
         } catch {}
     }
     func testRemoveElements_PageLast() {
@@ -198,7 +185,6 @@ final class LargeArrayTests: XCTestCase {
             for (k,v) in try la.indexPagesInfo().enumerated() {
                 print(k, v)
             }
-            try la.coalescePages()
         } catch {}
     }
     func testRemoveElements_PagePartial() {
@@ -258,7 +244,6 @@ final class LargeArrayTests: XCTestCase {
             for (k,v) in try la.indexPagesInfo().enumerated() {
                 print(k, v)
             }
-            try la.coalescePages()
         } catch {}
     }
     ///
@@ -279,7 +264,6 @@ final class LargeArrayTests: XCTestCase {
             for (k,v) in try la.indexPagesInfo().enumerated() {
                 print(k, v)
             }
-            try la.coalescePages()
         } catch {
             XCTFail()
         }

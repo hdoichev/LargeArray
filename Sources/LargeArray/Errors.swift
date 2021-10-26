@@ -24,6 +24,7 @@ enum LAErrors: Error {
     case ErrorConstructingSourcePointer
     case InvalidAllocatedSize
     case InvalidNodeAddress
+    case InvalidObject
 }
 
 extension LAErrors: CustomStringConvertible {
@@ -45,6 +46,7 @@ extension LAErrors: CustomStringConvertible {
         case .ErrorConstructingSourcePointer: return "ErrorConstructingSourcePointer"
         case .InvalidAllocatedSize: return "InvalidAllocatedSize"
         case .InvalidNodeAddress: return "InvalidNodeAddress"
+        case .InvalidObject: return "InvalidObject"
         }
     }
 }

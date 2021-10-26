@@ -7,6 +7,7 @@
 
 import Foundation
 import Allocator
+import HArray
 
 typealias Nodes = ContiguousArray<Node>
 ///
@@ -15,8 +16,6 @@ public struct PageInfo: Codable {
     var nodes_address: Address = Address.max
     var availableNodes: LargeArray.Index = 0
     var maxNodes: LargeArray.Index = 0
-    var next: Address = Address.max
-    var prev: Address = Address.max
 }
 @available(macOS 10.15.4, *)
 extension PageInfo {
@@ -25,7 +24,7 @@ extension PageInfo {
 }
 ///
 @available(macOS 10.15.4, *)
-struct IndexPage {
+class IndexPage: Codable {
     enum Properties {
         case All, Info, Nodes
     }
@@ -45,7 +44,7 @@ struct IndexPage {
     private var _nodes: Nodes
     private var _dirty: Dirty
     private var _infoAddress: Int
-    private var _storage: StorageSystem
+    private var _storage: StorageSystem?
     //
     var info: PageInfo {
         get { return _info }
@@ -60,12 +59,28 @@ struct IndexPage {
     var isFull: Bool { _info.isFull }
     var pageAddress: Address { _infoAddress }
     ///
+    enum CodingKeys: String, CodingKey {
+        case a
+    }
+    public required init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        _infoAddress = try values.decode(Int.self, forKey: .a)
+        _info = PageInfo()
+        _nodes = Nodes()
+        _dirty = Dirty()
+        _storage = nil
+    }
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(_infoAddress, forKey: .a)
+    }
+    ///
     init() {
         _infoAddress = Int.max
         _info = PageInfo()
         _nodes = Nodes()
         _dirty = Dirty()
-        _storage = StorageSystem(fileHandle: FileHandle(), allocator: Allocator(capacity: 0), nodeCache: 0, pageCache: 0)
+        _storage = StorageSystem(fileHandle: FileHandle(), allocator: Allocator(capacity: 0), nodeCache: 0, pageCache: 0, maxNodesPerPage: 128)
     }
     ///
     init(maxNodes: LargeArray.Index, using storage: StorageSystem) throws {
@@ -93,105 +108,37 @@ struct IndexPage {
     /// Deallocate the page and remove it from the prev/next chain,
     /// by linking the prev and next to one another
     ///
-    mutating func deallocate() throws {
-        try Node.deallocate(start: _infoAddress, using: _storage)
-        try Node.deallocate(start: _info.nodes_address, using: _storage)
+    func deallocate() throws {
+        try Node.deallocate(start: _infoAddress, using: _storage!)
+        try Node.deallocate(start: _info.nodes_address, using: _storage!)
         // remove this page from the prev and next pages.
-        if _info.prev != Address.max {
-            var prevInfo = try PageInfo.load(using: _storage, at: _info.prev)
-            prevInfo.next = _info.next
-            try prevInfo.store(using: _storage, address: _info.prev)
-        }
-        if _info.next != Address.max {
-            var nextInfo = try PageInfo.load(using: _storage, at: _info.next)
-            nextInfo.prev = _info.prev
-            try nextInfo.store(using: _storage, address: _info.next)
-        }
         _info = PageInfo()
         _nodes = Nodes()
         _dirty = Dirty()
         _infoAddress = Int.max
     }
-    /// Either move some the nodes from this page to the next, or create a new page and then move some
-    /// of the nodes from this page into the new one.
     ///
-    ///
-    mutating func ensurePageHasFreeSpace() throws {
-        guard isFull else { return }
-        // Ensure nodes are loaded so we can move them to another page.
-        if _nodes.isEmpty {
-            try _loadNodes()
-        }
-        
-        if self._info.next != Address.invalid {
-            // move some of the nodes from the current page to the next, if that is possible.
-            // Otherwise create a new page and split the nodes between the current and the new page.
-            var nextPage = try IndexPage(address: self._info.next, using: _storage)
-            if nextPage.info.availableNodes < nextPage.info.maxNodes/2 {
-                try nextPage.load(from: nextPage.pageAddress, what: .Nodes)
-                let elementsCount = nextPage.info.maxNodes/2
-                try self.moveNodes(NodeMoveLocation.ToFront(self._info.availableNodes-elementsCount..<self._info.availableNodes),
-                                   into: &nextPage)
-                try nextPage.store()
-                try self.store()
-            }
-        }
-//        if self.isFull && self._info.prev != Address.invalid {
-//            var prevPage = try IndexPage(address: self._info.prev, using: _storage)
-//            if prevPage._info.availableNodes < prevPage._info.maxNodes/2 {
-//                try prevPage.load(from: prevPage.pageAddress, what: .Nodes)
-//                let elementsCount = prevPage._info.maxNodes/2
-//                try self.moveNodes(NodeMoveLocation.ToBack(0..<self._info.availableNodes-elementsCount),
-//                                   into: &prevPage)
-//                try prevPage.store()
-//                try self.store()
-//            }
-//        }
-        if self.isFull {
-            try splitPage()
-        }
-//        _dirty = Dirty(true)
-    }
-    mutating func splitPage() throws {
-        var newPage = try IndexPage(maxNodes: _info.maxNodes, using: _storage)
-        newPage.info.prev = self.pageAddress
-        newPage.info.next = self._info.next
-        // Update the _curPage.info._next page to point to the newPage.
-        if self._info.next != Address.invalid {
-            var pageToUpdate = try IndexPage(address: self._info.next, using: _storage)
-            pageToUpdate.info.prev = newPage.pageAddress
-            try pageToUpdate.store()
-        }
-        // now, link the current page with the split (new) page
-        self.info.next = newPage.pageAddress
-        // Move half of the nodes to the new page and save it
-        try self.moveNodes(NodeMoveLocation.ToFront(self._info.availableNodes/2..<self._info.availableNodes),
-                                                    into: &newPage)
-        try newPage.store()
-        try self.store()
-    }
-    ///
-    mutating func appendNode(_ node: Node) throws {
+    func appendNode(_ node: Node) throws {
         guard isFull == false else { throw LAErrors.NodeIsFull }
         _dirty.nodes = true
         _nodes.append(node)
         info.availableNodes += 1
     }
     ///
-    mutating func insertNode(_ node: Node, at position: LargeArray.Index) throws {
+    func insertNode(_ node: Node, at position: LargeArray.Index) throws {
         guard isFull == false else { throw LAErrors.NodeIsFull }
         _dirty.nodes = true
         _nodes.insert(node, at: position)
         info.availableNodes += 1
     }
     ///
-    mutating func removeNode(at position: LargeArray.Index) {
+    func removeNode(at position: LargeArray.Index) {
         _dirty.nodes = true
         _nodes.remove(at: position)
         info.availableNodes -= 1
     }
     ///
-    mutating func updateNode(at position: LargeArray.Index, with node: Node) {
+    func updateNode(at position: LargeArray.Index, with node: Node) {
         _dirty.nodes = true
         _nodes[position] = node
     }
@@ -199,54 +146,89 @@ struct IndexPage {
     func node(at position: LargeArray.Index) -> Node {
         return _nodes[position]
     }
-    ///
-    mutating func moveNodes(_ location: NodeMoveLocation, into outPage: inout IndexPage) throws {
-        switch location {
-        case .ToBack(let range):
-            outPage._nodes += _nodes[range]
-            _nodes.removeSubrange(range)
-        case .ToFront(let range):
-            outPage._nodes = _nodes[range] + outPage._nodes
-            _nodes.removeSubrange(range)
-        }
-        outPage._info.availableNodes = outPage._nodes.count
-            
-        info.availableNodes = _nodes.count
-        _dirty.nodes = true
-    }
-    ///
-    func isValidIndex(_ position: LargeArray.Index) -> Bool {
-        return (0..<_info.availableNodes).contains(position)
-    }
 }
 
 @available(macOS 10.15.4, *)
+extension IndexPage: Storable {
+    typealias StorageAllocator = StorageSystem
+    typealias Index = Int
+    typealias Element = Node
+    var startIndex: Int { 0 }
+    var endIndex: Int { _info.availableNodes }
+    var capacity: Int {
+        self._info.maxNodes
+    }
+    func index(after i: Int) -> Int { i + 1 }
+    
+    subscript(position: Int) -> Node {
+        get {
+            Node()
+        }
+        set(newValue) {
+            
+        }
+    }
+    
+    
+    var allocator: StorageAllocator? {
+        get {
+            _storage
+        }
+        set(newValue) {
+            _storage = newValue!
+        }
+    }
+    
+    func replace(with elements: [Element]) {
+        
+    }
+    
+    func append(_ elements: [Element]) {
+        
+    }
+    
+    func append(_ element: Element) {
+        
+    }
+    
+    func insert(_ element: Element, at position: Int) {
+        
+    }
+    
+    func remove(at: Int) -> Element {
+        return Node()
+    }
+}
+
+///     Store and load functionality
+@available(macOS 10.15.4, *)
 extension IndexPage {
     ///
-    mutating func store() throws {
+    func store() throws {
+        guard let storage = _storage else { return }
         guard _dirty.isDirty else { return }
         if _infoAddress == Int.max {
             // Allocate the space for the info and the nodes.
-            guard let ainfo = _storage.allocator.allocate(MemoryLayout<PageInfo>.size, overhead: MemoryLayout<Node>.size) else { throw LAErrors.AllocationFailed }
-            guard let anodes = _storage.allocator.allocate(MemoryLayout<Node>.size * _info.maxNodes,
+            guard let ainfo = storage.allocator.allocate(MemoryLayout<PageInfo>.size, overhead: MemoryLayout<Node>.size) else { throw LAErrors.AllocationFailed }
+            guard let anodes = storage.allocator.allocate(MemoryLayout<Node>.size * _info.maxNodes,
                                                            overhead: MemoryLayout<Node>.size) else {
-                _storage.allocator.deallocate(chunks: ainfo)
+                storage.allocator.deallocate(chunks: ainfo)
                 throw LAErrors.AllocationFailed }
             _infoAddress = ainfo[0].address
             _info.nodes_address = anodes[0].address
 
             _info.availableNodes = _nodes.count // preserve the count of the actual nodes, so we can properly load the nodes data
-            try _store(from: _info).storeWithNodes(chunks: ainfo, using: _storage.fileHandle)
+            try _store(from: _info).store(with: ainfo, using: storage.fileHandle)
             _dirty.info = false
 
             var nodesData = Data(repeating: 0, count: MemoryLayout<Node>.size * Int(_info.maxNodes))
             nodesData.withUnsafeMutableBytes { dest in _nodes.withUnsafeBytes { source in dest.copyBytes(from: source) }}
-            try nodesData.storeWithNodes(chunks: anodes, using: _storage.fileHandle)
+            try nodesData.store(with: anodes, using: storage.fileHandle)
             _dirty.nodes = false
         } else {
             if _dirty.info {
                 _info.availableNodes = _nodes.count // preserve the count of the actual nodes, so we can properly load the nodes data
-                try _store(from: _info).update(startNodeAddress: _infoAddress, using: _storage.fileHandle)
+                try _store(from: _info).update(startNodeAddress: _infoAddress, using: storage.fileHandle)
                 _dirty.info = false
             }
             // Store the nodes into the data buffer
@@ -256,30 +238,32 @@ extension IndexPage {
             if _dirty.nodes {
                 var nodesData = Data(repeating: 0, count: MemoryLayout<Node>.size * Int(_info.maxNodes))
                 nodesData.withUnsafeMutableBytes { dest in _nodes.withUnsafeBytes { source in dest.copyBytes(from: source) }}
-                try nodesData.update(startNodeAddress: _info.nodes_address, using: _storage.fileHandle)
+                try nodesData.update(startNodeAddress: _info.nodes_address, using: storage.fileHandle)
                 _dirty.nodes = false
             }
         }
     }
     ///
-    mutating func _loadInfo(from address: Address) throws {
-        let di = try Data.loadFromNodes(start: address, upTo: MemoryLayout<PageInfo>.size, using: _storage.fileHandle)
+    func _loadInfo(from address: Address) throws {
+        guard let storage = _storage else { throw LAErrors.InvalidObject }
+        let di = try Data.load(start: address, upTo: MemoryLayout<PageInfo>.size, using: storage.fileHandle)
         try _load(into: &_info, from: di)
         _infoAddress = address
         _dirty.info = false
     }
     ///
-    mutating func _loadNodes() throws {
+    func _loadNodes() throws {
+        guard let storage = _storage else { throw LAErrors.InvalidObject }
         guard _info.nodes_address != Int.max else { throw LAErrors.InvalidNodeAddress }
         guard _info.availableNodes > 0 else { _nodes.removeAll(); return }
-        let nd = try Data.loadFromNodes(start: _info.nodes_address,
-                                        upTo: MemoryLayout<Node>.size * _info.availableNodes, using: _storage.fileHandle)
+        let nd = try Data.load(start: _info.nodes_address,
+                                        upTo: MemoryLayout<Node>.size * _info.availableNodes, using: storage.fileHandle)
         _nodes = Nodes(repeating: Node(), count: Int(_info.availableNodes))
         _nodes.withUnsafeMutableBufferPointer { nd.copyBytes(to: $0) }
         _dirty.nodes = false
     }
     ///
-    mutating func load(from address: Address, what: Properties = .All) throws {
+    func load(from address: Address, what: Properties = .All) throws {
         switch what {
         case .All:
             try _loadInfo(from: address)
@@ -298,7 +282,7 @@ extension IndexPage {
 extension IndexPage: CustomStringConvertible {
     var description: String {
         return """
-        Page(Address: \(pageAddress), AvailableNodes: \(_info.availableNodes) (\(_nodes.count)), Prev: \(_info.prev), Next: \(_info.next))
+        Page(Address: \(pageAddress), AvailableNodes: \(_info.availableNodes) (\(_nodes.count))
         """
     }
 }
@@ -321,10 +305,10 @@ extension PageInfo{
         try _store(from: self).update(startNodeAddress: address, using: storage.fileHandle)
     }
     func store(using storage: StorageSystem, with chunks: Allocator.Chunks) throws {
-        try _store(from: self).storeWithNodes(chunks: chunks, using: storage.fileHandle)
+        try _store(from: self).store(with: chunks, using: storage.fileHandle)
     }
     static func load(using storage: StorageSystem, at address: Address) throws -> PageInfo {
-        let di = try Data.loadFromNodes(start: address, upTo: MemoryLayout<PageInfo>.size, using: storage.fileHandle)
+        let di = try Data.load(start: address, upTo: MemoryLayout<PageInfo>.size, using: storage.fileHandle)
         var info = PageInfo()
         try _load(into: &info, from: di)
         return info
