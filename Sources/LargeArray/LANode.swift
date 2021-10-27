@@ -15,9 +15,9 @@ struct LANode: Codable {
     var reserved: Int = 0
 }
 
-extension LANode {
-    func dump() {
-        print("ChunksAddress = \(self.chunk_address), Used = \(self.used), Reserved = \(self.reserved)")
+extension LANode: CustomStringConvertible {
+    var description: String {
+        String("ChunksAddress = \(self.chunk_address), Used = \(self.used), Reserved = \(self.reserved)")
     }
 }
 
@@ -66,12 +66,6 @@ extension LANode {
     }
 }
 
-extension LANode: CustomStringConvertible {
-    var description: String {
-        "Node(chunks_address: \(chunk_address), used: \(used), reserved: \(reserved))"
-    }
-}
-
 @available(macOS 10.15.4, *)
 extension Data {
     /// Update the nodes used data starting at startNodeAddress
@@ -114,9 +108,8 @@ extension Data {
         var loadAddress = address
 //        try data.withUnsafeMutableBytes { buffer in
         // The Data is guaranteed to be in this form:
-        //  LANode
-        //  Data
-        // Where the LANode.used is the size of the data
+        //  LANode + Data
+        // Where the LANode.used is the size of the Data
         while loadAddress != Address.invalid {
             try n.load(using: fileHandle, from: loadAddress)
             if data.count < byteCount {
@@ -135,7 +128,6 @@ extension Data {
         var data = Data()
         var n = LANode()
         var loadAddress = address
-        //        try data.withUnsafeMutableBytes { buffer in
         // The Data is guaranteed to be in this form:
         //  LANode
         //  Data
@@ -147,7 +139,6 @@ extension Data {
             data += chunkData
             loadAddress = n.chunk_address
         }
-        //        }
         return data
     }
 }

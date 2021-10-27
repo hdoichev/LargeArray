@@ -13,13 +13,6 @@ public typealias Address = Int
 @available(macOS 10.15.4, *)
 typealias StorageArray = HArray<StorageSystem>
 ///
-//protocol StorageAccessor {
-//    func write<T: DataProtocol>(_ data: T, at address: Address) throws
-//    func write<T: DataProtocol>(data: T) throws
-//    func read(from address: Address, upToCount: Int) throws -> Data?
-//    func read(bytesCount: Int) throws -> Data?
-//    func seek(to: Address) throws
-//}
 @available(macOS 10.15.4, *)
 class NodesPageCache {
     struct Cache {
@@ -197,6 +190,10 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
         try! _storage.fileHandle.close()
     }
     ///
+    public func defragAllocator() {
+        _storage.allocator.defrag(purge: true)
+    }
+    ///
     func storeHeader() throws {
 //        try _storage.fileHandle.seek(toOffset: UInt64(_rootAddress))
         try _storage.fileHandle.write(_store(from: _header), at: _rootAddress)
@@ -360,7 +357,7 @@ extension MemoryLayout {
 }
 
 @available(macOS 10.15.4, *)
-extension FileHandle/*: StorageAccessor */{
+extension FileHandle {
     func write<T: DataProtocol>(_ data: T, at address: Address) throws {
         try self.seek(toOffset: UInt64(address))
         try self.write(contentsOf: data)
@@ -424,6 +421,7 @@ extension StorageArray {
     func store() throws -> Address {
         guard let storage = self.allocator else { throw LAErrors.InvalidObject }
         guard let encodedArray = try? JSONEncoder().encode(self) else { throw LAErrors.AllocationFailed }
+        print("Storage Array encoded count: \(encodedArray.count)")
         guard let chunks = storage.allocator.allocate(encodedArray.count, overhead: MemoryLayout<LANode>.size) else { throw LAErrors.AllocationFailed }
         try encodedArray.store(with: chunks, using: storage.fileHandle)
         return chunks[0].address

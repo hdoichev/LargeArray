@@ -17,11 +17,6 @@ public struct PageInfo: Codable {
     var count: LargeArray.Index = 0
     var maxCount: LargeArray.Index = 0
 }
-@available(macOS 10.15.4, *)
-extension PageInfo {
-    public var isFull: Bool { count >= maxCount }
-    public var freeSpaceCount: Int { return maxCount - count }
-}
 ///
 @available(macOS 10.15.4, *)
 class NodesPage: Codable {
@@ -36,7 +31,6 @@ class NodesPage: Codable {
             }
         }
     }
-    var isFull: Bool { _info.isFull }
     ///
     enum CodingKeys: String, CodingKey {
         case i
