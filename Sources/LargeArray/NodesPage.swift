@@ -9,7 +9,7 @@ import Foundation
 import Allocator
 import HArray
 
-typealias Nodes = ContiguousArray<Node>
+typealias Nodes = ContiguousArray<LANode>
 ///
 @available(macOS 10.15.4, *)
 public struct PageInfo: Codable {
@@ -53,14 +53,17 @@ class NodesPage: Codable {
     ///
     init(maxNodes: LargeArray.Index, using storage: StorageSystem) throws {
         _storage = storage
-        guard let chunks = _storage!.allocator.allocate(maxNodes * MemoryLayout<Node>.size, overhead: MemoryLayout<Node>.size) else { throw LAErrors.AllocationFailed }
+        guard let chunks = _storage!.allocator.allocate(maxNodes * MemoryLayout<LANode>.size, overhead: MemoryLayout<LANode>.size) else { throw LAErrors.AllocationFailed }
         _info = PageInfo(address: chunks[0].address, count: 0, maxCount: maxNodes)
+        
+        let d = Data(repeating: 0, count: maxNodes * MemoryLayout<LANode>.size)
+        try d.store(with: chunks, using: _storage!.fileHandle)
     }
     /// Deallocate the page and remove it from the prev/next chain,
     /// by linking the prev and next to one another
     ///
     func deallocate() throws {
-        try Node.deallocate(start: _info.address, using: _storage!)
+        try LANode.deallocate(start: _info.address, using: _storage!)
         // remove this page from the prev and next pages.
         _info = PageInfo()
     }
@@ -70,7 +73,7 @@ class NodesPage: Codable {
 extension NodesPage: Storable {
     typealias StorageAllocator = StorageSystem
     typealias Index = Int
-    typealias Element = Node
+    typealias Element = LANode
     var startIndex: Int { 0 }
     var endIndex: Int { _info.count }
     var capacity: Int {
@@ -115,14 +118,14 @@ extension NodesPage: Storable {
     }
     
     func remove(at position: Int) -> Element {
-        var r: Element = Node()
+        var r: Element = LANode()
         _storage!.pageCache.access(pageInfo: _info) {
             r = $0.remove(at: position)
         }
         _info.count -= 1
         return r
     }
-    subscript(position: Int) -> Node {
+    subscript(position: Int) -> LANode {
         get {
             _storage!.pageCache.node(pageInfo: _info, at: position)
         }
@@ -155,12 +158,12 @@ extension Address {
 @available(macOS 10.15.4, *)
 extension Nodes {
     func store(to info: PageInfo, with chunks: Allocator.Chunks, using fileHandle: FileHandle) throws {
-        var nodesData = Data(repeating: 0, count: MemoryLayout<Node>.size * Int(info.maxCount))
+        var nodesData = Data(repeating: 0, count: MemoryLayout<LANode>.size * Int(info.maxCount))
         nodesData.withUnsafeMutableBytes { dest in self.withUnsafeBytes { source in dest.copyBytes(from: source) }}
         try nodesData.store(with: chunks, using: fileHandle) // TODO: What about error handling???
     }
     func update(to info: PageInfo, using fileHandle: FileHandle) throws {
-        var nodesData = Data(repeating: 0, count: MemoryLayout<Node>.size * Int(info.maxCount))
+        var nodesData = Data(repeating: 0, count: MemoryLayout<LANode>.size * Int(info.maxCount))
         nodesData.withUnsafeMutableBytes { dest in self.withUnsafeBytes { source in dest.copyBytes(from: source) }}
         try nodesData.update(startNodeAddress: info.address, using: fileHandle) // TODO: What about error handling???
     }

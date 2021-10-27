@@ -9,20 +9,20 @@ import Foundation
 import Allocator
 
 ///
-struct Node: Codable {
+struct LANode: Codable {
     var chunk_address: Address = Address.invalid
     var used: Int = 0
     var reserved: Int = 0
 }
 
-extension Node {
+extension LANode {
     func dump() {
         print("ChunksAddress = \(self.chunk_address), Used = \(self.used), Reserved = \(self.reserved)")
     }
 }
 
-extension Node: Equatable {
-    static func == (lhs: Node, rhs: Node) -> Bool {
+extension LANode: Equatable {
+    static func == (lhs: LANode, rhs: LANode) -> Bool {
         return (lhs.chunk_address == rhs.chunk_address &&
                 lhs.used == rhs.used &&
                 lhs.reserved == rhs.reserved)
@@ -30,9 +30,9 @@ extension Node: Equatable {
 }
 
 @available(macOS 10.15.4, *)
-extension Node {
+extension LANode {
     mutating func load(using fileHandle: FileHandle, from address: Address) throws {
-        guard let nodeData = try fileHandle.read(from: address, upToCount: MemoryLayout<Node>.size) else { throw LAErrors.ErrorReadingData }
+        guard let nodeData = try fileHandle.read(from: address, upToCount: MemoryLayout<LANode>.size) else { throw LAErrors.ErrorReadingData }
         try _load(into: &self, from: nodeData)
     }
     func store(using fileHandle: FileHandle, at address: Address) throws {
@@ -43,7 +43,7 @@ extension Node {
     }
     func getChunksForData(using fileHandle: FileHandle) throws -> Allocator.Chunks {
         var chunks = Allocator.Chunks()
-        var n = Node()
+        var n = LANode()
         var loadAddress = self.chunk_address
         while loadAddress != Address.invalid {
             try n.load(using: fileHandle, from: loadAddress)
@@ -54,7 +54,7 @@ extension Node {
     }
     /// Read the Chunks from storage and deallocate them using the allocator
     static func deallocate(start address: Address, using storage: StorageSystem) throws {
-        var n = Node()
+        var n = LANode()
         var loadAddress = address
         while loadAddress != Address.invalid {
             try n.load(using: storage.fileHandle, from: loadAddress)
@@ -66,7 +66,7 @@ extension Node {
     }
 }
 
-extension Node: CustomStringConvertible {
+extension LANode: CustomStringConvertible {
     var description: String {
         "Node(chunks_address: \(chunk_address), used: \(used), reserved: \(reserved))"
     }
@@ -78,7 +78,7 @@ extension Data {
     func update(startNodeAddress: Address, using fileHandle: FileHandle) throws {
         var updateAddress = startNodeAddress
         try self.withUnsafeBytes { buffer in
-            var n = Node()
+            var n = LANode()
             var bufPosition = 0
             while updateAddress != Int.max {
                 try n.load(using: fileHandle, from: updateAddress)
@@ -90,16 +90,16 @@ extension Data {
         }
     }
     func store(with chunks: Allocator.Chunks, using fileHandle: FileHandle) throws {
-        guard ((self.count + chunks.count * MemoryLayout<Node>.size) <= chunks.allocatedCount) else { throw LAErrors.InvalidAllocatedSize }
+        guard ((self.count + chunks.count * MemoryLayout<LANode>.size) <= chunks.allocatedCount) else { throw LAErrors.InvalidAllocatedSize }
         try self.withUnsafeBytes { buffer in
             var bufPosition = 0
-            let overhead = MemoryLayout<Node>.size
+            let overhead = MemoryLayout<LANode>.size
             for i in 0..<chunks.count {
                 // Store info about this chunk
                 let nextChunkAddress = (i+1 < chunks.count) ? chunks[i+1].address: Int.max
                 let usedCount = Swift.min(buffer.count - bufPosition, chunks[i].count - overhead)
                 guard usedCount > 0 else { throw LAErrors.InvalidAllocatedSize }
-                try Node(chunk_address: nextChunkAddress, used: usedCount, reserved: chunks[i].count)
+                try LANode(chunk_address: nextChunkAddress, used: usedCount, reserved: chunks[i].count)
                     .store(using: fileHandle, at: chunks[i].address)
                 // This is a nasty case from const to mutable. It is done only to avoid copying data when saving to file.
                 try buffer.baseAddress!.store(fromOffset: bufPosition, byteCount: usedCount, using: fileHandle)
@@ -110,13 +110,13 @@ extension Data {
     static func load(start address: Address, upTo byteCount: Int, using fileHandle: FileHandle) throws -> Data {
 //        var data = Data(repeating: 0, count: byteCount)
         var data = Data(capacity: byteCount)
-        var n = Node()
+        var n = LANode()
         var loadAddress = address
 //        try data.withUnsafeMutableBytes { buffer in
         // The Data is guaranteed to be in this form:
-        //  Node
+        //  LANode
         //  Data
-        // Where the Node.used is the size of the data
+        // Where the LANode.used is the size of the data
         while loadAddress != Address.invalid {
             try n.load(using: fileHandle, from: loadAddress)
             if data.count < byteCount {
@@ -133,13 +133,13 @@ extension Data {
     static func load(start address: Address, using fileHandle: FileHandle) throws -> Data {
         //        var data = Data(repeating: 0, count: byteCount)
         var data = Data()
-        var n = Node()
+        var n = LANode()
         var loadAddress = address
         //        try data.withUnsafeMutableBytes { buffer in
         // The Data is guaranteed to be in this form:
-        //  Node
+        //  LANode
         //  Data
-        // Where the Node.used is the size of the data
+        // Where the LANode.used is the size of the data
         while loadAddress != Address.invalid {
             try n.load(using: fileHandle, from: loadAddress)
             guard n.used > 0 else { throw LAErrors.InvalidAllocatedSize }

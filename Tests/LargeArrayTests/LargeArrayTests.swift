@@ -43,7 +43,7 @@ final class LargeArrayTests: XCTestCase {
         createFile()
         // read the file
         func readFile() {
-            guard let la = LargeArray(path: file_path) else { XCTFail("LargeArray init failed"); return }
+            guard let _ = LargeArray(path: file_path) else { XCTFail("LargeArray init failed"); return }
 //            la[0].dump()
         }
         readFile()
@@ -52,7 +52,7 @@ final class LargeArrayTests: XCTestCase {
     func testAppendMultipleNodes() {
         let numElements = 1024*2
         func create() {
-            guard let la = LargeArray(path: file_path, capacity: 1024*1024) else { XCTFail("LargeArray init failed"); return }
+            guard let la = LargeArray(path: file_path, capacity: 1*1024*1024) else { XCTFail("LargeArray init failed"); return }
             for i in 0..<numElements {
                 XCTAssertNoThrow( try la.append(Data(repeating: UInt8(i % 128), count: 10)))
             }
@@ -61,8 +61,8 @@ final class LargeArrayTests: XCTestCase {
         // read the file
         func readFile() {
             guard let la = LargeArray(path: file_path) else { XCTFail("LargeArray init failed"); return }
-            for i in stride(from: 0, to: numElements, by: 100) {
-            }
+//            for i in stride(from: 0, to: numElements, by: 100) {
+//            }
             for i in 0..<numElements {
                 la[i].forEach{XCTAssertEqual($0, UInt8(i % 128))}
             }

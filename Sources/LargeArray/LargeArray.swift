@@ -41,12 +41,12 @@ class NodesPageCache {
             storeCache()
             page.info = pageInfo
             guard let nd = try? Data.load(start: page.info.address,
-                                          upTo: MemoryLayout<Node>.size * page.info.count, using: fileHandle) else { fatalError("Failed to load cache for nodes. address:\(page.info.address), itemsCount: \(page.info.count)") }
-            page.nodes = Nodes(repeating: Node(), count: Int(page.info.count))
+                                          upTo: MemoryLayout<LANode>.size * page.info.count, using: fileHandle) else { fatalError("Failed to load cache for nodes. address:\(page.info.address), itemsCount: \(page.info.count)") }
+            page.nodes = Nodes(repeating: LANode(), count: Int(page.info.count))
             page.nodes.withUnsafeMutableBufferPointer { nd.copyBytes(to: $0) }
         }
     }
-    func node(pageInfo: PageInfo, at position: Int) -> Node {
+    func node(pageInfo: PageInfo, at position: Int) -> LANode {
         updateCache(pageInfo)
         // Load the nodepage (if required) and return the the Node at position.
         return page.nodes[position]
@@ -56,7 +56,7 @@ class NodesPageCache {
         // Load the nodepage (if required) and return the the Node at position.
         block(&page.nodes)
     }
-    func access(node position: Int, pageInfo: PageInfo, block: (inout Node)->Void) {
+    func access(node position: Int, pageInfo: PageInfo, block: (inout LANode)->Void) {
         updateCache(pageInfo)
         // Load the nodepage (if required) and return the the Node at position.
         block(&page.nodes[position])
@@ -85,12 +85,12 @@ extension StorageSystem: StorableAllocator {
 ///   Header:
 ///   NodesPage:
 ///     Info:
-///     nodes: ContiguousArray<Node>
+///     nodes: ContiguousArray<LANode>
 ///     --- The Nodes are stored immediately after the NodesPage.Info information ---
 ///
 ///    ... the rest is a mixture of Objects data (which is pointed to by the Nodes) and additional IndexPages
 ///
-///  Node:
+///  LANode:
 ///     address: Address
 ///     used: Int
 ///     reserved: Int
@@ -156,7 +156,7 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
             guard try _storage.fileHandle.seekToEnd() == _rootAddress else { throw error }
         }
 
-        try _storageArray.store()
+//        _header._storageAddress = try _storageArray.store()
         try storeHeader()
     }
     ///
@@ -178,6 +178,7 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
     deinit {
         do {
             if _dirty || _header._freeRoot == Int.max {
+                _storage.pageCache.storeCache()
                 _header._storageAddress = try _storageArray.store()
                 _header._freeRoot = try _storage.allocator.store(using: _storage)
                 try storeHeader()
@@ -194,21 +195,23 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
         try _storage.fileHandle.write(_store(from: _header), at: _rootAddress)
     }
     ///
-    func createNode(with data: Data) throws -> Node {
+    func createNode(with data: Data) throws -> LANode {
         // Store the data and create a node to point to it.
-        let overhead = MemoryLayout<Node>.size
-        guard let allocated = _storage.allocator.allocate(data.count, overhead: overhead) else { throw LAErrors.AllocationFailed }
-        let node = Node(chunk_address: allocated[0].address, used: data.count, reserved: data.count)
+        let overhead = MemoryLayout<LANode>.size
+        guard let allocated = _storage.allocator.allocate(data.count, overhead: overhead) else {
+            throw LAErrors.AllocationFailed
+        }
+        let node = LANode(chunk_address: allocated[0].address, used: data.count, reserved: data.count)
         try data.store(with: allocated, using: _storage.fileHandle)
         _dirty = true
         return node
     }
     /// Update the data stored in Node.
     /// This function follows the chain of Nodes in order to find all relevant chunks.
-    func updateNodeData(_ node: Node, contentsOf data: Data) throws {
+    func updateNodeData(_ node: LANode, contentsOf data: Data) throws {
         try data.update(startNodeAddress: node.chunk_address, using: _storage.fileHandle)
 //        var nodeAddress = node.chunk_address
-//        var n = Node()
+//        var n = LANode()
 //        try data.withUnsafeBytes{ buffer in
 //            var bufPosition = 0
 //            try n.load(using: _storage.fileHandle, from: nodeAddress)
@@ -223,7 +226,7 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
 //            nodeAddress = n.chunk_address
 //        }
     }
-    func getNodeData(_ node: Node) throws -> Data {
+    func getNodeData(_ node: LANode) throws -> Data {
         return try node.loadData(using: _storage.fileHandle)
     }
 }
@@ -269,10 +272,12 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
                     let node = _storageArray[position]
                     if node.used != newValue.count {
                         // Deallocate the existing node data - such that it is available for reuse
-                        try Node.deallocate(start: node.chunk_address, using: _storage)
+                        try LANode.deallocate(start: node.chunk_address, using: _storage)
 //                        try _storage.allocator.deallocate(chunks: node.getChunksForData(using: _storage.fileHandle))
                         // Create a new node
                         let newNode = try createNode(with: newValue)
+                        _storageArray[position] = newNode
+                        _header._totalUsedBytesCount += newNode.used - node.used
                     } else {
                         try updateNodeData(node, contentsOf: newValue)
                     }
@@ -287,10 +292,11 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
         set { self[position] = try! JSONEncoder().encode(newValue) }
     }
 //    @inlinable
-    public /*mutating*/ func append(_ element: Data) throws {
+    public func append(_ element: Data) throws {
         try autoreleasepool {
             // update the NodesPage and store that too??? Or store the NodesPage only after a number of changes have occurred.
             try _storageArray.append(createNode(with: element))
+            _header._totalUsedBytesCount += Address(element.count)
         }
     }
     public func append<T:Codable>(_ element: T) throws {
@@ -300,9 +306,9 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
     public func remove(at position: Index) throws {
         try autoreleasepool {
             let node = _storageArray.remove(at: position) // TODO: make this return the element so the above line is not needed.
-            try Node.deallocate(start: node.chunk_address, using: _storage)
+            try LANode.deallocate(start: node.chunk_address, using: _storage)
             totalCount -= 1
-            totalUsedCount -= Address(node.used)
+            _header._totalUsedBytesCount -= Address(node.used)
             _dirty = true
         }
     }
@@ -319,7 +325,7 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
             // If the pate is full - then split it in a half (creating two linked pages) and insert the new
             // element into one of those pages.
             totalCount += 1
-            totalUsedCount += element.count
+            _header._totalUsedBytesCount += element.count
         }
     }
     public func insert<T: Codable>(_ element: T, at position: Index) throws {
@@ -393,7 +399,7 @@ extension Allocator {
     func store(using storage: StorageSystem) throws -> Address {
         let encodedAllocator = try JSONEncoder().encode(self)
         print("Allocator encoded count: \(encodedAllocator.count)")
-        guard let chunks = self.allocate(encodedAllocator.count, overhead: MemoryLayout<Node>.size) else { throw LAErrors.AllocationFailed }
+        guard let chunks = self.allocate(encodedAllocator.count, overhead: MemoryLayout<LANode>.size) else { throw LAErrors.AllocationFailed }
         try encodedAllocator.store(with: chunks, using: storage.fileHandle)
         return chunks[0].address
     }
@@ -403,13 +409,15 @@ extension Allocator {
 extension StorageArray {
     ///
     static func load(using storage: StorageSystem, from address: Address, with capacity: Int) throws -> StorageArray {
-        return try JSONDecoder().decode(StorageArray.self, from: Data.load(start: address, using: storage.fileHandle))
+        let sa = try JSONDecoder().decode(StorageArray.self, from: Data.load(start: address, using: storage.fileHandle))
+        sa.allocator = storage
+        return sa
     }
     ///
     func store() throws -> Address {
         guard let storage = self.allocator else { throw LAErrors.InvalidObject }
         guard let encodedArray = try? JSONEncoder().encode(self) else { throw LAErrors.AllocationFailed }
-        guard let chunks = storage.allocator.allocate(encodedArray.count, overhead: MemoryLayout<Node>.size) else { throw LAErrors.AllocationFailed }
+        guard let chunks = storage.allocator.allocate(encodedArray.count, overhead: MemoryLayout<LANode>.size) else { throw LAErrors.AllocationFailed }
         try encodedArray.store(with: chunks, using: storage.fileHandle)
         return chunks[0].address
     }

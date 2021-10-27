@@ -15,8 +15,8 @@ final class MiscTests: XCTestCase {
 
     ///
     func testStoreArrayToData() {
-        var nodes = ContiguousArray<Node>(repeating: Node(chunk_address: 0, used: 0, reserved: 0), count: elements_count)
-        let nodesDataSize = MemoryLayout<Node>.size * Int(elements_count)
+        var nodes = ContiguousArray<LANode>(repeating: LANode(chunk_address: 0, used: 0, reserved: 0), count: elements_count)
+        let nodesDataSize = MemoryLayout<LANode>.size * Int(elements_count)
         var nodesData = Data(count: nodesDataSize)
         for i in 0..<nodes.count {
             nodes[i].chunk_address = Address(i)
@@ -32,10 +32,10 @@ final class MiscTests: XCTestCase {
             }
         }
         nodesData.withUnsafeBytes { bytes in
-            let raw_nodes = bytes.bindMemory(to: Node.self)
+            let raw_nodes = bytes.bindMemory(to: LANode.self)
         }
         // now init the arrat from the data
-        var loadedNodes = ContiguousArray<Node>(repeating: Node(chunk_address: 0, used: 0, reserved: 0), count: elements_count)
+        var loadedNodes = ContiguousArray<LANode>(repeating: LANode(chunk_address: 0, used: 0, reserved: 0), count: elements_count)
         loadedNodes.withUnsafeMutableBufferPointer { dest in
             nodesData.copyBytes(to: dest)
         }
@@ -44,12 +44,12 @@ final class MiscTests: XCTestCase {
     }
     ///
     func testStoreLoadNode() {
-        var node = Node()
-        var node2 = Node()
-        var data = Data(repeating: 0, count: MemoryLayout<Node>.size)
+        var node = LANode()
+        var node2 = LANode()
+        var data = Data(repeating: 0, count: MemoryLayout<LANode>.size)
         print("Info size: \(MemoryLayout<PageInfo>.size)")
         print("Header size: \(MemoryLayout<Header>.size)")
-        print("Node size: \(MemoryLayout<Node>.size)")
+        print("Node size: \(MemoryLayout<LANode>.size)")
         do {
             node.chunk_address = 8_555_777_333
             node.used = 123
@@ -65,9 +65,9 @@ final class MiscTests: XCTestCase {
     }
     ///
     func testStoreLoadNodePerformance() {
-        var node = Node()
-        var node2 = Node()
-        var data = Data(repeating: 0, count: MemoryLayout<Node>.size)
+        var node = LANode()
+        var node2 = LANode()
+        var data = Data(repeating: 0, count: MemoryLayout<LANode>.size)
         measure {
             do {
                 for i in 0..<100_000 {
@@ -86,11 +86,11 @@ final class MiscTests: XCTestCase {
     }
     ///
     func testJsonEncoder() {
-        var a1 = ContiguousArray<Node>()
-        let a1_2 = ContiguousArray<Node>(repeating: Node(), count: elements_count)
+        var a1 = ContiguousArray<LANode>()
+        let a1_2 = ContiguousArray<LANode>(repeating: LANode(), count: elements_count)
         a1.reserveCapacity(elements_count)
         for _ in 0..<elements_count {
-            a1.append(Node(chunk_address: Int.random(in: 100_000_000..<8_000_000_000_000_000),
+            a1.append(LANode(chunk_address: Int.random(in: 100_000_000..<8_000_000_000_000_000),
                            used: Int.random(in: 1_000_000..<8_000_000),
                            reserved: Int.random(in: 8_000_000..<16_000_000)))
         }
