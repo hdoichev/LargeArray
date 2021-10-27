@@ -25,6 +25,7 @@ class NodesPageCache {
     struct Cache {
         var info: PageInfo
         var nodes: Nodes = Nodes()
+        var dirty: Bool = false
     }
     var fileHandle: FileHandle
     var page = Cache(info: PageInfo(), nodes: Nodes())
@@ -33,7 +34,9 @@ class NodesPageCache {
     }
     ///
     func storeCache() {
+        guard page.dirty else { return }
         try? page.nodes.update(to: page.info, using: fileHandle) // TODO: What about error handling???
+        page.dirty = false
     }
     ///
     func updateCache(_ pageInfo: PageInfo) {
@@ -43,7 +46,9 @@ class NodesPageCache {
             guard let nd = try? Data.load(start: page.info.address,
                                           upTo: MemoryLayout<LANode>.size * page.info.count, using: fileHandle) else { fatalError("Failed to load cache for nodes. address:\(page.info.address), itemsCount: \(page.info.count)") }
             page.nodes = Nodes(repeating: LANode(), count: Int(page.info.count))
+            page.nodes.reserveCapacity(page.info.maxCount)
             page.nodes.withUnsafeMutableBufferPointer { nd.copyBytes(to: $0) }
+            page.dirty = false
         }
     }
     func node(pageInfo: PageInfo, at position: Int) -> LANode {
@@ -55,11 +60,13 @@ class NodesPageCache {
         updateCache(pageInfo)
         // Load the nodepage (if required) and return the the Node at position.
         block(&page.nodes)
+        page.dirty = true
     }
     func access(node position: Int, pageInfo: PageInfo, block: (inout LANode)->Void) {
         updateCache(pageInfo)
         // Load the nodepage (if required) and return the the Node at position.
         block(&page.nodes[position])
+        page.dirty = true
     }
 }
 /// Aggregate all the classes used for storage
@@ -254,8 +261,7 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
     @inlinable public func index(after i: Index) -> Index {
         return i + 1
     }
-    
-//    @inlinable
+    ///
     public subscript(position: Index) -> Data {
         get {
             do {
@@ -291,18 +297,19 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
         get { try! JSONDecoder().decode(T.self, from: self[position]) }
         set { self[position] = try! JSONEncoder().encode(newValue) }
     }
-//    @inlinable
+    ///
     public func append(_ element: Data) throws {
         try autoreleasepool {
             // update the NodesPage and store that too??? Or store the NodesPage only after a number of changes have occurred.
             try _storageArray.append(createNode(with: element))
             _header._totalUsedBytesCount += Address(element.count)
+            totalCount += 1
         }
     }
     public func append<T:Codable>(_ element: T) throws {
         try self.append(JSONEncoder().encode(element))
     }
-//    @inlinable
+    ///
     public func remove(at position: Index) throws {
         try autoreleasepool {
             let node = _storageArray.remove(at: position) // TODO: make this return the element so the above line is not needed.

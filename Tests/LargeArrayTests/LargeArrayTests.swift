@@ -79,14 +79,16 @@ final class LargeArrayTests: XCTestCase {
     }
     ///
     func testAppendManyNodeToArrayPerformance() {
-        let numElements = 1024*10
-        let la = LargeArray(path: file_path)
+        let numElements = 1024*100
+        let la = LargeArray(path: file_path, maxPerPage: 32)
         XCTAssertNotNil(la)
         guard let la = la else { return }
+        let d = Data(repeating: 0xfa, count: Int.random(in: 1500..<1501))
         measure {
             do {
                 for i in 0..<numElements {
-                    try la.append(Data(repeating: UInt8(i % 128), count: Int.random(in: 100..<2000)))
+//                    try la.append(Data(repeating: UInt8(i % 128), count: Int.random(in: 1500..<1501)))
+                    try la.append(d)
                 }
             } catch {
                 print(error)
@@ -97,19 +99,19 @@ final class LargeArrayTests: XCTestCase {
     }
     ///
     func testTraverseAllElementsInArrayPerformance() {
-        let numElements = 1024*100
+        let numElements = 1024*10
         do {
             let la = LargeArray(path: file_path)
             XCTAssertNotNil(la)
             guard let la = la else { return }
             for i in 0..<numElements {
-                try la.append(Data(repeating: UInt8(i % 128), count: Int.random(in: 1000..<2000)))
+                try la.append(Data(repeating: UInt8(i % 128), count: Int.random(in: 1000..<1501)))
             }
             print(la)
             measure {
                 for n in la {
-//                    XCTAssertTrue((10..<2000).contains(n.count))
-                    if (1000..<2000).contains(n.count) == false {
+                    XCTAssertTrue((1000..<1501).contains(n.count))
+                    if (1000..<1501).contains(n.count) == false {
                         print("ERROR")
                         break
                     }

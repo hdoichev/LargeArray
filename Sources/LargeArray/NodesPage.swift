@@ -79,6 +79,7 @@ extension NodesPage: Storable {
     var capacity: Int {
         self._info.maxCount
     }
+    var count: Int { _info.count }
     func index(after i: Int) -> Int { i + 1 }
     
     var allocator: StorageAllocator? {
@@ -91,10 +92,11 @@ extension NodesPage: Storable {
         _storage!.pageCache.access(pageInfo: _info) {
             $0 = Nodes(elements)
         }
+        _info.count = elements.count
     }
     
     func append(_ elements: [Element]) {
-        guard _info.maxCount + elements.count <= _info.maxCount else { fatalError("Appending to full node") }
+        guard _info.count + elements.count <= _info.maxCount else { fatalError("Appending to full node") }
         _storage!.pageCache.access(pageInfo: _info) {
             $0 += elements
         }
