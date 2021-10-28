@@ -29,6 +29,13 @@ extension Header {
 ///
 extension Header: CustomStringConvertible {
     public var description: String {
-        "\(Header.self): version: \(_version), count: \(_count), totalUsedBytesCount: \(_totalUsedBytesCount), storageAddress: \(_storageAddress), freeRoot: \(_freeRoot)"
+        """
+        \(Header.self):
+            version: \(_version),
+            count: \(_count),
+            totalUsedBytesCount: \(_totalUsedBytesCount),
+            storageAddress: \(_storageAddress),
+            freeRoot: \(_freeRoot)
+        """
     }
 }

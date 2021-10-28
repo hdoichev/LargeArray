@@ -12,56 +12,7 @@ public typealias Address = Int
 
 @available(macOS 10.15.4, *)
 typealias StorageArray = HArray<StorageSystem>
-///
-@available(macOS 10.15.4, *)
-class NodesPageCache {
-    struct Cache {
-        var info: PageInfo
-        var nodes: Nodes = Nodes()
-        var dirty: Bool = false
-    }
-    var fileHandle: FileHandle
-    var page = Cache(info: PageInfo(), nodes: Nodes())
-    init(_ fileHandle: FileHandle) {
-        self.fileHandle = fileHandle
-    }
-    ///
-    func storeCache() {
-        guard page.dirty else { return }
-        try? page.nodes.update(to: page.info, using: fileHandle) // TODO: What about error handling???
-        page.dirty = false
-    }
-    ///
-    func updateCache(_ pageInfo: PageInfo) {
-        if pageInfo.address != page.info.address {
-            storeCache()
-            page.info = pageInfo
-            guard let nd = try? Data.load(start: page.info.address,
-                                          upTo: MemoryLayout<LANode>.size * page.info.count, using: fileHandle) else { fatalError("Failed to load cache for nodes. address:\(page.info.address), itemsCount: \(page.info.count)") }
-            page.nodes = Nodes(repeating: LANode(), count: Int(page.info.count))
-            page.nodes.reserveCapacity(page.info.maxCount)
-            page.nodes.withUnsafeMutableBufferPointer { nd.copyBytes(to: $0) }
-            page.dirty = false
-        }
-    }
-    func node(pageInfo: PageInfo, at position: Int) -> LANode {
-        updateCache(pageInfo)
-        // Load the nodepage (if required) and return the the Node at position.
-        return page.nodes[position]
-    }
-    func access(pageInfo: PageInfo, block: (inout Nodes)->Void) {
-        updateCache(pageInfo)
-        // Load the nodepage (if required) and return the the Node at position.
-        block(&page.nodes)
-        page.dirty = true
-    }
-    func access(node position: Int, pageInfo: PageInfo, block: (inout LANode)->Void) {
-        updateCache(pageInfo)
-        // Load the nodepage (if required) and return the the Node at position.
-        block(&page.nodes[position])
-        page.dirty = true
-    }
-}
+
 /// Aggregate all the classes used for storage
 @available(macOS 10.15.4, *)
 struct StorageSystem {
@@ -178,7 +129,7 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
     deinit {
         do {
             if _dirty || _header._freeRoot == Int.max {
-                _storage.pageCache.storeCache()
+                _storage.pageCache.flush()
                 _header._storageAddress = try _storageArray.store()
                 _header._freeRoot = try _storage.allocator.store(using: _storage)
                 try storeHeader()

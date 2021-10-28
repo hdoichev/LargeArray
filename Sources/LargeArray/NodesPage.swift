@@ -130,6 +130,7 @@ extension NodesPage: Storable {
         }
     }
     func notInUse() {
+        _storage?.pageCache.purge(_info.address)
         try? deallocate()
     }
 }
