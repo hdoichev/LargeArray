@@ -13,25 +13,25 @@ class NodesPageCache {
     class Cache {
         var info: PageInfo = PageInfo()
         var nodes: Nodes = Nodes()
-        var dirty: Bool = false
-        init(_ info: PageInfo, _ nodes: Nodes, _ dirty: Bool) {
+        var changes: Int = 0
+        init(_ info: PageInfo, _ nodes: Nodes, _ changes: Int = 0) {
             self.info = info
             self.nodes = nodes
-            self.dirty = dirty
+            self.changes = changes
         }
     }
     typealias PagesCache = [Address:Cache]
     var fileHandle: FileHandle
     var pages: PagesCache = PagesCache()
-//    var page = Cache(info: PageInfo(), nodes: Nodes())
     init(_ fileHandle: FileHandle) {
         self.fileHandle = fileHandle
     }
     /// Store all dirty pages to storage.
-    func flush() {
+    public func flush() {
         pages.forEach { (k, v) in
-            if v.dirty {
+            if v.changes > 0 {
                 try? v.nodes.update(to: v.info, using: fileHandle)
+                v.changes = 0
             }
         }
     }
@@ -47,7 +47,7 @@ class NodesPageCache {
         var nodes = Nodes(repeating: LANode(), count: Int(pageInfo.count))
         nodes.reserveCapacity(pageInfo.maxCount)
         nodes.withUnsafeMutableBufferPointer { nd.copyBytes(to: $0) }
-        pages[pageInfo.address] = Cache(pageInfo, nodes, false)
+        pages[pageInfo.address] = Cache(pageInfo, nodes)
         block(&(pages[pageInfo.address]!))
 //        if pageInfo.address != page.info.address {
 //            storeCache()
@@ -69,7 +69,11 @@ class NodesPageCache {
     func access(pageInfo: PageInfo, block: (inout Nodes)->Void) {
         updateCache(pageInfo) {
             block(&$0.nodes)
-            $0.dirty = true
+            $0.changes += 1
+            if $0.changes > 15 {
+                try? $0.nodes.update(to: $0.info, using: fileHandle)
+                $0.changes = 0
+            }
         }
 //        block(&pages[pageInfo.address]!.nodes)
 //        pages[pageInfo.address]!.dirty = true
@@ -77,7 +81,11 @@ class NodesPageCache {
     func access(node position: Int, pageInfo: PageInfo, block: (inout LANode)->Void) {
         updateCache(pageInfo) {
             block(&$0.nodes[position])
-            $0.dirty = true
+            $0.changes += 1
+            if $0.changes > 15 {
+                try? $0.nodes.update(to: $0.info, using: fileHandle)
+                $0.changes = 0
+            }
         }
 //        block(&pages[pageInfo.address]!.nodes[position])
 //        pages[pageInfo.address]!.dirty = true

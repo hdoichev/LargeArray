@@ -77,9 +77,14 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
     public var totalUsedBytesCount: Address { _header._totalUsedBytesCount }
     public var totalFreeBytesCount: Int { _storage.allocator.freeByteCount }
     ///
-    init(start root: Address, maxPerPage: Index, fileHandle: FileHandle, capacity: Int = Int.max) throws {
+    init(start root: Address,
+         maxPerPage: Index,
+         fileHandle: FileHandle,
+         capacity: Int = Int.max,
+         minAllocSize: Int) throws {
+        guard minAllocSize > MemoryLayout<LANode>.size else { throw LAErrors.InvalidAllocatedSize }
         _storage = StorageSystem(fileHandle: fileHandle,
-                                 allocator: Allocator(capacity: capacity, start: root + MemoryLayout<Header>.size),
+                                 allocator: Allocator(capacity: capacity, start: root + MemoryLayout<Header>.size, minimumAllocationSize: minAllocSize),
                                  nodeCache: 0,
                                  pageCache: NodesPageCache(fileHandle),
                                  maxNodesPerPage: maxPerPage)
@@ -107,17 +112,19 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
             guard try _storage.fileHandle.seekToEnd() == _rootAddress else { throw error }
         }
 
-//        _header._storageAddress = try _storageArray.store()
         try storeHeader()
     }
     ///
-    public convenience init?(path: String, capacity: Int = Address.max, maxPerPage: Index = 1024) {
+    public convenience init?(path: String,
+                             capacity: Int = Address.max,
+                             maxPerPage: Index = 32,
+                             minAllocSize: Int = 512) {
         if FileManager.default.fileExists(atPath: path) == false {
             FileManager.default.createFile(atPath: path, contents: nil)
         }
         if let fh = FileHandle(forUpdatingAtPath: path) {
             do {
-                try self.init(start: 0, maxPerPage: maxPerPage, fileHandle: fh, capacity: capacity)
+                try self.init(start: 0, maxPerPage: maxPerPage, fileHandle: fh, capacity: capacity, minAllocSize: minAllocSize)
             } catch {
                 return nil
             }
@@ -187,18 +194,6 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
 }
 
 @available(macOS 10.15.4, *)
-extension LargeArray {
-    public func indexPagesInfo() throws -> [PageInfo] {
-        var infos = [PageInfo]()
-        return infos
-    }
-}
-
-@available(macOS 10.15.4, *)
-extension LargeArray {
-}
-
-@available(macOS 10.15.4, *)
 extension LargeArray: MutableCollection, RandomAccessCollection {
     @inlinable public var startIndex: Index {
         return 0
@@ -227,7 +222,6 @@ extension LargeArray: MutableCollection, RandomAccessCollection {
                     if node.used != newValue.count {
                         // Deallocate the existing node data - such that it is available for reuse
                         try LANode.deallocate(start: node.chunk_address, using: _storage)
-//                        try _storage.allocator.deallocate(chunks: node.getChunksForData(using: _storage.fileHandle))
                         // Create a new node
                         let newNode = try createNode(with: newValue)
                         _storageArray[position] = newNode

@@ -23,7 +23,7 @@ let package = Package(
         .target(
             name: "LargeArray",
             dependencies: ["Allocator", "HArray"],
-            resources: [.process("README.md")]),
+            exclude: ["../../README.md"]),
         .testTarget(
             name: "LargeArrayTests",
             dependencies: ["LargeArray"]),

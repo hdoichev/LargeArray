@@ -73,7 +73,6 @@ final class LargeArrayTests: XCTestCase {
             la[0] = Data(repeating: 19, count: 19)
             XCTAssertEqual(la[0].count, 19)
             print(la)
-            print(try! la.indexPagesInfo() )
         }
         readFile()
     }
@@ -117,9 +116,6 @@ final class LargeArrayTests: XCTestCase {
                     }
                 }
             }
-            for (k,v) in try la.indexPagesInfo().enumerated() {
-                print(k, v)
-            }
         } catch {}
     }
     ///
@@ -140,9 +136,6 @@ final class LargeArrayTests: XCTestCase {
             la[0].forEach { XCTAssertEqual($0, 1) }
             la.forEach { $0.forEach { XCTAssertEqual($0, 1) } }
             print(la)
-            for (k,v) in try la.indexPagesInfo().enumerated() {
-                print(k, v)
-            }
         } catch {}
     }
     func testRemoveElements_PageLast() {
@@ -162,9 +155,6 @@ final class LargeArrayTests: XCTestCase {
             la[0].forEach { XCTAssertEqual($0, 1) }
             la.forEach { $0.forEach { XCTAssertEqual($0, 1) } }
             print(la)
-            for (k,v) in try la.indexPagesInfo().enumerated() {
-                print(k, v)
-            }
         } catch {}
     }
     func testRemoveElements_PageFirst() {
@@ -184,9 +174,6 @@ final class LargeArrayTests: XCTestCase {
             la[0].forEach { XCTAssertEqual($0, 1) }
             la.forEach { $0.forEach { XCTAssertEqual($0, 1) }}
             print(la)
-            for (k,v) in try la.indexPagesInfo().enumerated() {
-                print(k, v)
-            }
         } catch {}
     }
     func testRemoveElements_PagePartial() {
@@ -217,10 +204,6 @@ final class LargeArrayTests: XCTestCase {
                 }
 //                print("Used count: \(la2.totalUsedBytesCount), Free count: \(la2.totalFreeBytesCount)")
             }
-            //
-            for (k,v) in try la.indexPagesInfo().enumerated() {
-                print(k, v)
-            }
         } catch {}
     }
     ///
@@ -243,9 +226,6 @@ final class LargeArrayTests: XCTestCase {
 //            try la.insert(Data(repeating: 1, count: elementSize), at: 0)
             try la.append(Data(repeating: 1, count: elementSize))
             print(la)
-            for (k,v) in try la.indexPagesInfo().enumerated() {
-                print(k, v)
-            }
         } catch {}
     }
     ///
@@ -263,9 +243,6 @@ final class LargeArrayTests: XCTestCase {
             XCTAssertNoThrow(try la.insert(Data(repeating: 3, count: 100), at: 1023))
             la[1023].forEach{XCTAssertEqual($0, 3)}
             print(la)
-            for (k,v) in try la.indexPagesInfo().enumerated() {
-                print(k, v)
-            }
         } catch {
             XCTFail()
         }
@@ -306,9 +283,6 @@ final class LargeArrayTests: XCTestCase {
             }
 
             print(la)
-            for (k,v) in try la.indexPagesInfo().enumerated() {
-                print(k, v)
-            }
         } catch {
             XCTFail()
         }
@@ -345,9 +319,6 @@ final class LargeArrayTests: XCTestCase {
 //            let a = la[0..<10]
 //            a.forEach { print($0) }
             print(la)
-            for (k,v) in try la.indexPagesInfo().enumerated() {
-                print(k, v)
-            }
         } catch {
             XCTFail()
         }
