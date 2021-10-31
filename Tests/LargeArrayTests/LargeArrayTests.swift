@@ -52,7 +52,7 @@ final class LargeArrayTests: XCTestCase {
     func testAppendMultipleNodes() {
         let numElements = 1024*2
         func create() {
-            guard let la = LargeArray(path: file_path, capacity: 1*1024*1024) else { XCTFail("LargeArray init failed"); return }
+            guard let la = LargeArray(path: file_path, capacity: 10*1024*1024) else { XCTFail("LargeArray init failed"); return }
             for i in 0..<numElements {
                 XCTAssertNoThrow( try la.append(Data(repeating: UInt8(i % 128), count: 10)))
             }

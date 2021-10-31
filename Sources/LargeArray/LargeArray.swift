@@ -56,7 +56,6 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
     let _rootAddress: Address
     @usableFromInline
     var _header: Header
-    let _maxElementsPerPage: Index
     var _storageArray: StorageArray
     var _dirty: Bool = false
     ///
@@ -84,14 +83,15 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
          minAllocSize: Int) throws {
         guard minAllocSize > MemoryLayout<LANode>.size else { throw LAErrors.InvalidAllocatedSize }
         _storage = StorageSystem(fileHandle: fileHandle,
-                                 allocator: Allocator(capacity: capacity, start: root + MemoryLayout<Header>.size, minimumAllocationSize: minAllocSize),
+                                 allocator: Allocator(capacity: capacity,
+                                                      start: root + MemoryLayout<Header>.size,
+                                                      minimumAllocationSize: minAllocSize),
                                  nodeCache: 0,
-                                 pageCache: NodesPageCache(fileHandle),
+                                 pageCache: NodesPageCache(fileHandle, maxElementsPerPage: maxPerPage),
                                  maxNodesPerPage: maxPerPage)
         _rootAddress = root
-        _header = Header()
-        _maxElementsPerPage = maxPerPage
-        _storageArray = StorageArray(maxElementsPerNode: _maxElementsPerPage, allocator: _storage)
+        _header = Header(maxElementsPerPage: maxPerPage)
+        _storageArray = StorageArray(maxElementsPerNode: _header._maxElementsPerPage, allocator: _storage)
 
         // Read header if possible. If error, throw
         do {
@@ -100,7 +100,7 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
             // Load the Allocator free space.
             _storage.allocator = try Allocator.load(using: _storage, from: _header._freeRoot)
             
-            _storageArray = try StorageArray.load(using: _storage, from: _header._storageAddress, with: _maxElementsPerPage)
+            _storageArray = try StorageArray.load(using: _storage, from: _header._storageAddress, with: _header._maxElementsPerPage)
             // TODO: Better verification that the data is correct
             return
         } catch {

@@ -90,7 +90,7 @@ extension NodesPage: Storable {
     }
     
     func append(_ elements: [Element]) {
-        guard _info.count + elements.count <= _info.maxCount else { fatalError("Appending to full node") }
+        guard _info.count + elements.count <= _info.maxCount else { fatalError("Appending will overflow node") }
         _storage!.pageCache.access(pageInfo: _info) {
             $0 += elements
         }

@@ -31,12 +31,9 @@ final class MiscTests: XCTestCase {
                 dest.copyBytes(from: source)
             }
         }
-        nodesData.withUnsafeBytes { bytes in
-            let raw_nodes = bytes.bindMemory(to: LANode.self)
-        }
         // now init the arrat from the data
         var loadedNodes = ContiguousArray<LANode>(repeating: LANode(chunk_address: 0, used: 0, reserved: 0), count: elements_count)
-        loadedNodes.withUnsafeMutableBufferPointer { dest in
+        _ = loadedNodes.withUnsafeMutableBufferPointer { dest in
             nodesData.copyBytes(to: dest)
         }
         XCTAssertEqual(nodes, loadedNodes, "Nodes should be identical.")
@@ -56,7 +53,6 @@ final class MiscTests: XCTestCase {
             node.reserved = 456
             data = try _store(from: node)
             try _load(into: &node2, from: data)
-            node2.dump()
             XCTAssertEqual(node, node2, "Nodes are the equal.")
         } catch {
             print("Error: \(error)")

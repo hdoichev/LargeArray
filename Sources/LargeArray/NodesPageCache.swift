@@ -6,88 +6,135 @@
 //
 
 import Foundation
-
-///
+import Heap
+/// Keep a set of NodePages in memory.
+/// When the cash is full then reuse the oldest Cache that is available.
+/// Reduce allocations of NodesCache pages and keep the number of memory under control.
 @available(macOS 10.15.4, *)
 class NodesPageCache {
-    class Cache {
+    class Cache: Comparable {
+        // MARK: Heap compare
+        static func < (lhs: NodesPageCache.Cache, rhs: NodesPageCache.Cache) -> Bool {
+            return lhs._cacheAge < rhs._cacheAge
+        }
+        // MARK: Heap compare
+        static func == (lhs: NodesPageCache.Cache, rhs: NodesPageCache.Cache) -> Bool {
+            lhs._cacheAge == rhs._cacheAge
+        }
+        
+        var _cacheAge: Int = 0
         var info: PageInfo = PageInfo()
         var nodes: Nodes = Nodes()
         var changes: Int = 0
+        //
         init(_ info: PageInfo, _ nodes: Nodes, _ changes: Int = 0) {
             self.info = info
             self.nodes = nodes
             self.changes = changes
         }
     }
+    //
     typealias PagesCache = [Address:Cache]
+    typealias PageHeapUsage = Heap<Cache> // keep track of which pages can be discarded
+    
     var fileHandle: FileHandle
     var pages: PagesCache = PagesCache()
-    init(_ fileHandle: FileHandle) {
+    var heap: PageHeapUsage = PageHeapUsage(<)
+    var maxHeap: Int
+    var _cacheCounter: Int = 0
+    ///
+    init(_ fileHandle: FileHandle, maxElementsPerPage: Int, heapSize: Int = 100) {
         self.fileHandle = fileHandle
+        self.maxHeap = heapSize
+        for _ in 0..<self.maxHeap {
+            var n = Nodes()
+            n.reserveCapacity(maxElementsPerPage)
+            heap.push(Cache(PageInfo(), n))
+        }
+        
     }
     /// Store all dirty pages to storage.
     public func flush() {
-        pages.forEach { (k, v) in
-            if v.changes > 0 {
-                try? v.nodes.update(to: v.info, using: fileHandle)
-                v.changes = 0
-            }
+        pages.forEach { (k, v) in persistCache(v) }
+    }
+    func persistCache(_ cache: Cache) {
+        if cache.changes > 0 {
+            try? cache.nodes.update(to: cache.info, using: fileHandle)
+            cache.changes = 0
         }
     }
     /// Remove the cached
     func purge(_ address: Address) {
-        pages.removeValue(forKey: address)
+        if let c = pages.removeValue(forKey: address) {
+            c._cacheAge = 0
+            c.changes = 0
+            // Bring the new page to the top of the heap.
+            // Not required to heapify right now, since
+            // getOldestCache will do the same
+//            heap.heapifySiftDown()
+        }
+    }
+    var cacheCounter: Int {
+        get { _cacheCounter }
+        set {
+            if newValue >= Int.max - 1 {
+                _cacheCounter = 0
+                heap.accessStorage { heapStorage in
+                    for i in 0..<heapStorage.count {
+                        _cacheCounter += 1
+                        if heapStorage[i]._cacheAge > 0 {
+                            heapStorage[i]._cacheAge = _cacheCounter
+                        }
+                    }
+                }
+            } else {
+                _cacheCounter = newValue
+            }
+        }
+    }
+    ///
+    func getOldestCache() -> Cache {
+        heap.heapifySiftDown()
+        guard let c = heap.top else { fatalError("Unable to allocate Cache") }
+        return c
     }
     ///
     func updateCache(_ pageInfo: PageInfo, block: (inout Cache)->Void) {
+        cacheCounter += 1
         guard nil == pages[pageInfo.address] else { block(&(pages[pageInfo.address]!)); return}
         guard let nd = try? Data.load(start: pageInfo.address,
                                       upTo: MemoryLayout<LANode>.size * pageInfo.count, using: fileHandle) else { fatalError("Failed to load cache for nodes. address:\(pageInfo.address), itemsCount: \(pageInfo.count)") }
-        var nodes = Nodes(repeating: LANode(), count: Int(pageInfo.count))
-        nodes.reserveCapacity(pageInfo.maxCount)
-        nodes.withUnsafeMutableBufferPointer { nd.copyBytes(to: $0) }
-        pages[pageInfo.address] = Cache(pageInfo, nodes)
+        let cache = getOldestCache()
+        persistCache(cache)
+        
+        pages.removeValue(forKey: cache.info.address) // oldest page is removed from the cache
+        cache.nodes.removeAll(keepingCapacity: true)
+        for _ in 0..<pageInfo.count { cache.nodes.append(LANode()) }
+        _ = cache.nodes.withUnsafeMutableBufferPointer { nd.copyBytes(to: $0) } // nodes page is updated
+        cache.info = pageInfo // page info is updated
+        pages[pageInfo.address] = cache // the updated cache is added back in
         block(&(pages[pageInfo.address]!))
-//        if pageInfo.address != page.info.address {
-//            storeCache()
-//            page.info = pageInfo
-//            guard let nd = try? Data.load(start: page.info.address,
-//                                          upTo: MemoryLayout<LANode>.size * page.info.count, using: fileHandle) else { fatalError("Failed to load cache for nodes. address:\(page.info.address), itemsCount: \(page.info.count)") }
-//            page.nodes = Nodes(repeating: LANode(), count: Int(page.info.count))
-//            page.nodes.reserveCapacity(page.info.maxCount)
-//            page.nodes.withUnsafeMutableBufferPointer { nd.copyBytes(to: $0) }
-//            page.dirty = false
-//        }
     }
     func node(pageInfo: PageInfo, at position: Int) -> LANode {
         var n = LANode()
-        updateCache(pageInfo) { n = $0.nodes[position] }
+        updateCache(pageInfo) {
+            n = $0.nodes[position]
+            $0._cacheAge = _cacheCounter
+        }
         return n
-//        return pages[pageInfo.address]!.nodes[position]
     }
     func access(pageInfo: PageInfo, block: (inout Nodes)->Void) {
         updateCache(pageInfo) {
             block(&$0.nodes)
+            $0._cacheAge = _cacheCounter
             $0.changes += 1
-            if $0.changes > 15 {
-                try? $0.nodes.update(to: $0.info, using: fileHandle)
-                $0.changes = 0
-            }
         }
-//        block(&pages[pageInfo.address]!.nodes)
-//        pages[pageInfo.address]!.dirty = true
     }
     func access(node position: Int, pageInfo: PageInfo, block: (inout LANode)->Void) {
         updateCache(pageInfo) {
             block(&$0.nodes[position])
+            $0._cacheAge = _cacheCounter
             $0.changes += 1
-            if $0.changes > 15 {
-                try? $0.nodes.update(to: $0.info, using: fileHandle)
-                $0.changes = 0
-            }
         }
-//        block(&pages[pageInfo.address]!.nodes[position])
-//        pages[pageInfo.address]!.dirty = true
     }
 }
