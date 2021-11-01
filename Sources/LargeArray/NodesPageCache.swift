@@ -43,7 +43,7 @@ class NodesPageCache {
     var maxHeap: Int
     var _cacheCounter: Int = 0
     ///
-    init(_ fileHandle: FileHandle, maxElementsPerPage: Int, heapSize: Int = 100) {
+    init(_ fileHandle: FileHandle, maxElementsPerPage: Int, heapSize: Int = 2048) {
         self.fileHandle = fileHandle
         self.maxHeap = heapSize
         for _ in 0..<self.maxHeap {
@@ -59,7 +59,11 @@ class NodesPageCache {
     }
     func persistCache(_ cache: Cache) {
         if cache.changes > 0 {
-            try? cache.nodes.update(to: cache.info, using: fileHandle)
+            do {
+                try cache.nodes.update(to: cache.info, using: fileHandle)
+            } catch {
+                fatalError("Unable to store Cache")
+            }
             cache.changes = 0
         }
     }
@@ -68,6 +72,7 @@ class NodesPageCache {
         if let c = pages.removeValue(forKey: address) {
             c._cacheAge = 0
             c.changes = 0
+            c.info = PageInfo()
             // Bring the new page to the top of the heap.
             // Not required to heapify right now, since
             // getOldestCache will do the same
@@ -104,16 +109,17 @@ class NodesPageCache {
         guard nil == pages[pageInfo.address] else { block(&(pages[pageInfo.address]!)); return}
         guard let nd = try? Data.load(start: pageInfo.address,
                                       upTo: MemoryLayout<LANode>.size * pageInfo.count, using: fileHandle) else { fatalError("Failed to load cache for nodes. address:\(pageInfo.address), itemsCount: \(pageInfo.count)") }
-        let cache = getOldestCache()
-        persistCache(cache)
-        
-        pages.removeValue(forKey: cache.info.address) // oldest page is removed from the cache
-        cache.nodes.removeAll(keepingCapacity: true)
+        var cache = getOldestCache()
+        if cache.info.address != .invalid {
+            persistCache(cache)
+            pages.removeValue(forKey: cache.info.address) // oldest page is removed from the cache
+            cache.nodes.removeAll(keepingCapacity: true)
+        }
         for _ in 0..<pageInfo.count { cache.nodes.append(LANode()) }
         _ = cache.nodes.withUnsafeMutableBufferPointer { nd.copyBytes(to: $0) } // nodes page is updated
         cache.info = pageInfo // page info is updated
         pages[pageInfo.address] = cache // the updated cache is added back in
-        block(&(pages[pageInfo.address]!))
+        block(&cache)
     }
     func node(pageInfo: PageInfo, at position: Int) -> LANode {
         var n = LANode()

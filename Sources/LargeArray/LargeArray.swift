@@ -95,13 +95,15 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
 
         // Read header if possible. If error, throw
         do {
-            try _load(into: &_header, from: _storage.fileHandle.read(from: _rootAddress, upToCount: MemoryLayout<Header>.size) ?? Data())
-            guard _header._version <= _LA_VERSION else { throw LAErrors.InvalidFileVersion }
-            // Load the Allocator free space.
-            _storage.allocator = try Allocator.load(using: _storage, from: _header._freeRoot)
-            
-            _storageArray = try StorageArray.load(using: _storage, from: _header._storageAddress, with: _header._maxElementsPerPage)
-            // TODO: Better verification that the data is correct
+            try autoreleasepool {
+                try _load(into: &_header, from: _storage.fileHandle.read(from: _rootAddress, upToCount: MemoryLayout<Header>.size) ?? Data())
+                guard _header._version <= _LA_VERSION else { throw LAErrors.InvalidFileVersion }
+                // Load the Allocator free space.
+                _storage.allocator = try Allocator.load(using: _storage, from: _header._freeRoot)
+                
+                _storageArray = try StorageArray.load(using: _storage, from: _header._storageAddress, with: _header._maxElementsPerPage)
+                // TODO: Better verification that the data is correct
+            }
             return
         } catch {
             // Don't override the contents of the file. Continue only if storing data at the 'end' of the file.
@@ -149,7 +151,7 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
     }
     ///
     public func defragAllocator() {
-        _storage.allocator.defrag(purge: true)
+        _storage.allocator.defrag()
     }
     ///
     func storeHeader() throws {

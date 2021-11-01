@@ -102,6 +102,7 @@ extension Data {
         }
     }
     static func load(start address: Address, upTo byteCount: Int, using fileHandle: FileHandle) throws -> Data {
+        guard byteCount > 0 else { return Data() }
 //        var data = Data(repeating: 0, count: byteCount)
         var data = Data(capacity: byteCount)
         var n = LANode()
