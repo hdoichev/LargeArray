@@ -19,7 +19,7 @@ final class LargeArrayTests: XCTestCase {
     ///
     func testCreateEmptyLargeArray() {
         func create() {
-            let la = LargeArray(path: file_path, capacity: 1024*1024)
+            let la = LargeArray(path: file_path, capacity: 16*1024*1024)
             XCTAssertNotNil(la)
             guard let la = la else { return }
             print("Version: \(la._header)")
@@ -37,7 +37,7 @@ final class LargeArrayTests: XCTestCase {
     ///
     func testAppendNode() {
         func createFile() {
-            guard let la = LargeArray(path: file_path, capacity: 1024*1024) else { XCTFail("LargeArray init failed"); return }
+            guard let la = LargeArray(path: file_path, capacity: 16*1024*1024) else { XCTFail("LargeArray init failed"); return }
             XCTAssertNoThrow( try la.append(Data(repeating: 0, count: 10)))
         }
         createFile()
@@ -52,7 +52,7 @@ final class LargeArrayTests: XCTestCase {
     func testAppendMultipleNodes() {
         let numElements = 1024*2
         func create() {
-            guard let la = LargeArray(path: file_path, capacity: 10*1024*1024) else { XCTFail("LargeArray init failed"); return }
+            guard let la = LargeArray(path: file_path, capacity: 16*1024*1024) else { XCTFail("LargeArray init failed"); return }
             for i in 0..<numElements {
                 XCTAssertNoThrow( try la.append(Data(repeating: UInt8(i % 128), count: 10)))
             }

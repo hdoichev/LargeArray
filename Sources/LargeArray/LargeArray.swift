@@ -87,7 +87,7 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
                                                       start: root + MemoryLayout<Header>.size,
                                                       minimumAllocationSize: minAllocSize),
                                  nodeCache: 0,
-                                 pageCache: NodesPageCache(fileHandle, maxElementsPerPage: maxPerPage),
+                                 pageCache: NodesPageCache(fileHandle),
                                  maxNodesPerPage: maxPerPage)
         _rootAddress = root
         _header = Header(maxElementsPerPage: maxPerPage)

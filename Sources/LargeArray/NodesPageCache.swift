@@ -43,13 +43,11 @@ class NodesPageCache {
     var maxHeap: Int
     var _cacheCounter: Int = 0
     ///
-    init(_ fileHandle: FileHandle, maxElementsPerPage: Int, heapSize: Int = 2048) {
+    init(_ fileHandle: FileHandle, heapSize: Int = 2048) {
         self.fileHandle = fileHandle
         self.maxHeap = heapSize
         for _ in 0..<self.maxHeap {
-            var n = Nodes()
-            n.reserveCapacity(maxElementsPerPage)
-            heap.push(Cache(PageInfo(), n))
+            heap.push(Cache(PageInfo(), Nodes()))
         }
         
     }
