@@ -43,7 +43,7 @@ class NodesPageCache {
     var maxHeap: Int
     var _cacheCounter: Int = 0
     ///
-    init(_ fileHandle: FileHandle, heapSize: Int = 2048) {
+    init(_ fileHandle: FileHandle, heapSize: Int = 8*1024) {
         self.fileHandle = fileHandle
         self.maxHeap = heapSize
         for _ in 0..<self.maxHeap {

@@ -92,11 +92,6 @@ extension Data {
                 try buffer.baseAddress!.store(fromOffset: bufPosition, byteCount: Swift.abs(n.used), using: fileHandle)
                 bufPosition += n.used
                 updateAddress = n.chunk_address
-
-//                guard (bufPosition + n.used) <= buffer.count else { throw LAErrors.InvalidAllocatedSize }
-//                try buffer.baseAddress!.store(fromOffset: bufPosition, byteCount: n.used, using: fileHandle)
-//                bufPosition += n.used
-//                updateAddress = n.chunk_address
             }
         }
     }

@@ -174,21 +174,6 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
     /// This function follows the chain of Nodes in order to find all relevant chunks.
     func updateNodeData(_ node: LANode, contentsOf data: Data) throws {
         try data.update(startNodeAddress: node.chunk_address, using: _storage.fileHandle)
-//        var nodeAddress = node.chunk_address
-//        var n = LANode()
-//        try data.withUnsafeBytes{ buffer in
-//            var bufPosition = 0
-//            try n.load(using: _storage.fileHandle, from: nodeAddress)
-//            let usedCount = Swift.min(data.count, n.used)
-//            if usedCount != n.used {
-//                // update the stored node
-//                n.used = usedCount
-//                try n.store(using: _storage.fileHandle, at: nodeAddress)
-//            }
-//            try buffer.baseAddress!.store(fromOffset: bufPosition, byteCount: usedCount, using: _storage.fileHandle)
-//            bufPosition += usedCount
-//            nodeAddress = n.chunk_address
-//        }
     }
     func getNodeData(_ node: LANode) throws -> Data {
         return try node.loadData(using: _storage.fileHandle)
