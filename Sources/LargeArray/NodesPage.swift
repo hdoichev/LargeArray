@@ -154,14 +154,15 @@ extension Address {
 
 @available(macOS 10.15.4, *)
 extension Nodes {
-    func store(to info: PageInfo, with chunks: Allocator.Chunks, using fileHandle: FileHandle) throws {
-        var nodesData = Data(repeating: 0, count: MemoryLayout<LANode>.size * Int(info.maxCount))
-        nodesData.withUnsafeMutableBytes { dest in self.withUnsafeBytes { source in dest.copyBytes(from: source) }}
-        try nodesData.store(with: chunks, using: fileHandle) // TODO: What about error handling???
+    mutating func store(to info: PageInfo, with chunks: Allocator.Chunks, using fileHandle: FileHandle) throws {
+        try self.withUnsafeMutableBytes { buffer in
+            try Data(bytesNoCopy: buffer.baseAddress!, count: buffer.count, deallocator: .none)
+                .store(with: chunks, using: fileHandle)
+        }
     }
-    func update(to info: PageInfo, using fileHandle: FileHandle) throws {
-        var nodesData = Data(repeating: 0, count: MemoryLayout<LANode>.size * Int(info.maxCount))
+    func update(to address: Address, using fileHandle: FileHandle) throws {
+        var nodesData = Data(repeating: 0, count: MemoryLayout<LANode>.size * Int(self.count))
         nodesData.withUnsafeMutableBytes { dest in self.withUnsafeBytes { source in dest.copyBytes(from: source) }}
-        try nodesData.update(startNodeAddress: info.address, using: fileHandle) // TODO: What about error handling???
+        try nodesData.update(startNodeAddress: address, using: fileHandle) // TODO: What about error handling???
     }
 }

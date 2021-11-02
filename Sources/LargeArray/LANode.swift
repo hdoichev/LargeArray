@@ -72,14 +72,31 @@ extension Data {
     func update(startNodeAddress: Address, using fileHandle: FileHandle) throws {
         var updateAddress = startNodeAddress
         try self.withUnsafeBytes { buffer in
+            let overhead = MemoryLayout<LANode>.size
             var n = LANode()
             var bufPosition = 0
-            while updateAddress != Int.max {
+            var remaining = buffer.count
+            while updateAddress != Int.max && remaining > 0 {
                 try n.load(using: fileHandle, from: updateAddress)
-                guard (bufPosition + n.used) <= buffer.count else { throw LAErrors.InvalidAllocatedSize }
-                try buffer.baseAddress!.store(fromOffset: bufPosition, byteCount: n.used, using: fileHandle)
+                guard n.used != 0 else { throw LAErrors.InvalidAllocatedSize }
+                var useCount = Swift.min(remaining, n.reserved - overhead)
+                remaining -= useCount
+                if remaining == 0 {
+                    // negative marks the end of this update. Use negative value when loading Data to determine the last chunk in the chain
+                    useCount = -useCount
+                }
+                if useCount != n.used {
+                    n.used = useCount
+                    try n.store(using: fileHandle, at: updateAddress)
+                }
+                try buffer.baseAddress!.store(fromOffset: bufPosition, byteCount: Swift.abs(n.used), using: fileHandle)
                 bufPosition += n.used
                 updateAddress = n.chunk_address
+
+//                guard (bufPosition + n.used) <= buffer.count else { throw LAErrors.InvalidAllocatedSize }
+//                try buffer.baseAddress!.store(fromOffset: bufPosition, byteCount: n.used, using: fileHandle)
+//                bufPosition += n.used
+//                updateAddress = n.chunk_address
             }
         }
     }
@@ -87,17 +104,31 @@ extension Data {
         guard ((self.count + chunks.count * MemoryLayout<LANode>.size) <= chunks.allocatedCount) else { throw LAErrors.InvalidAllocatedSize }
         try self.withUnsafeBytes { buffer in
             var bufPosition = 0
+            var remaining = buffer.count
             let overhead = MemoryLayout<LANode>.size
             for i in 0..<chunks.count {
                 // Store info about this chunk
                 let nextChunkAddress = (i+1 < chunks.count) ? chunks[i+1].address: Int.max
-                let usedCount = Swift.min(buffer.count - bufPosition, chunks[i].count - overhead)
-                guard usedCount > 0 else { throw LAErrors.InvalidAllocatedSize }
-                try LANode(chunk_address: nextChunkAddress, used: usedCount, reserved: chunks[i].count)
-                    .store(using: fileHandle, at: chunks[i].address)
-                // This is a nasty case from const to mutable. It is done only to avoid copying data when saving to file.
-                try buffer.baseAddress!.store(fromOffset: bufPosition, byteCount: usedCount, using: fileHandle)
-                bufPosition += usedCount
+                if remaining > 0 {
+                    var usedCount = Swift.min(remaining, chunks[i].count - overhead)
+                    remaining -= usedCount
+                    guard usedCount > 0 else { throw LAErrors.InvalidAllocatedSize }
+                    if remaining == 0 {
+                        usedCount = -usedCount
+                    }
+                    try LANode(chunk_address: nextChunkAddress,
+                               used: usedCount, reserved: chunks[i].count)
+                        .store(using: fileHandle, at: chunks[i].address)
+                    // This is a nasty case from const to mutable. It is done only to avoid copying data when saving to file.
+                    try buffer.baseAddress!.store(fromOffset: bufPosition, byteCount: Swift.abs(usedCount), using: fileHandle)
+                    bufPosition += usedCount
+                } else {
+                    // Empty node.
+                    try LANode(chunk_address: nextChunkAddress,
+                               used: 0, reserved: chunks[i].count)
+                        .store(using: fileHandle, at: chunks[i].address)
+
+                }
             }
         }
     }
@@ -111,14 +142,16 @@ extension Data {
         // The Data is guaranteed to be in this form:
         //  LANode + Data
         // Where the LANode.used is the size of the Data
-        while loadAddress != Address.invalid {
+        while loadAddress != Address.invalid && data.count < byteCount {
             try n.load(using: fileHandle, from: loadAddress)
-            if data.count < byteCount {
-                guard n.used > 0 else { throw LAErrors.InvalidAllocatedSize }
-                let toRead = Swift.min(n.used, byteCount - data.count)
-                guard let chunkData = try fileHandle.read(bytesCount: toRead) else { throw LAErrors.ErrorReadingData }
-                data += chunkData
+            if n.used < 0 {
+                guard Swift.abs(n.used) + data.count == byteCount else { throw LAErrors.InvalidReadBufferSize }
+                n.used = -n.used
             }
+            guard n.used > 0 else { throw LAErrors.InvalidAllocatedSize }
+            let toRead = Swift.min(n.used, byteCount - data.count)
+            guard let chunkData = try fileHandle.read(bytesCount: toRead) else { throw LAErrors.ErrorReadingData }
+            data += chunkData
             loadAddress = n.chunk_address
         }
 //        }
@@ -130,15 +163,18 @@ extension Data {
         var n = LANode()
         var loadAddress = address
         // The Data is guaranteed to be in this form:
-        //  LANode
-        //  Data
+        //  LANode + Data
         // Where the LANode.used is the size of the data
         while loadAddress != Address.invalid {
             try n.load(using: fileHandle, from: loadAddress)
-            guard n.used > 0 else { throw LAErrors.InvalidAllocatedSize }
-            guard let chunkData = try fileHandle.read(bytesCount: n.used) else { throw LAErrors.ErrorReadingData }
+            guard n.used != 0 else { throw LAErrors.InvalidAllocatedSize }
+            guard let chunkData = try fileHandle.read(bytesCount: Swift.abs(n.used)) else { throw LAErrors.ErrorReadingData }
             data += chunkData
             loadAddress = n.chunk_address
+            // if this is the last chunk ... the loading is done
+            if n.used < 0 {
+                break
+            }
         }
         return data
     }

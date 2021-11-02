@@ -23,12 +23,12 @@ class NodesPageCache {
         }
         
         var _cacheAge: Int = 0
-        var info: PageInfo = PageInfo()
+        var address: Address
         var nodes: Nodes = Nodes()
         var changes: Int = 0
         //
-        init(_ info: PageInfo, _ nodes: Nodes, _ changes: Int = 0) {
-            self.info = info
+        init(_ address: Address, _ nodes: Nodes, _ changes: Int = 0) {
+            self.address = address
             self.nodes = nodes
             self.changes = changes
         }
@@ -47,7 +47,7 @@ class NodesPageCache {
         self.fileHandle = fileHandle
         self.maxHeap = heapSize
         for _ in 0..<self.maxHeap {
-            heap.push(Cache(PageInfo(), Nodes()))
+            heap.push(Cache(Address.invalid, Nodes()))
         }
         
     }
@@ -58,7 +58,7 @@ class NodesPageCache {
     func persistCache(_ cache: Cache) {
         if cache.changes > 0 {
             do {
-                try cache.nodes.update(to: cache.info, using: fileHandle)
+                try cache.nodes.update(to: cache.address, using: fileHandle)
             } catch {
                 fatalError("Unable to store Cache")
             }
@@ -70,7 +70,7 @@ class NodesPageCache {
         if let c = pages.removeValue(forKey: address) {
             c._cacheAge = 0
             c.changes = 0
-            c.info = PageInfo()
+            c.address = Address.invalid
             // Bring the new page to the top of the heap.
             // Not required to heapify right now, since
             // getOldestCache will do the same
@@ -108,14 +108,14 @@ class NodesPageCache {
         guard let nd = try? Data.load(start: pageInfo.address,
                                       upTo: MemoryLayout<LANode>.size * pageInfo.count, using: fileHandle) else { fatalError("Failed to load cache for nodes. address:\(pageInfo.address), itemsCount: \(pageInfo.count)") }
         var cache = getOldestCache()
-        if cache.info.address != .invalid {
+        if cache.address != .invalid {
             persistCache(cache)
-            pages.removeValue(forKey: cache.info.address) // oldest page is removed from the cache
+            pages.removeValue(forKey: cache.address) // oldest page is removed from the cache
             cache.nodes.removeAll(keepingCapacity: true)
         }
         for _ in 0..<pageInfo.count { cache.nodes.append(LANode()) }
         _ = cache.nodes.withUnsafeMutableBufferPointer { nd.copyBytes(to: $0) } // nodes page is updated
-        cache.info = pageInfo // page info is updated
+        cache.address = pageInfo.address // page info is updated
         pages[pageInfo.address] = cache // the updated cache is added back in
         block(&cache)
     }
