@@ -39,7 +39,7 @@ extension LANode {
         try fileHandle.write(_store(from: self), at: address)
     }
     func loadData(using fileHandle: FileHandle) throws -> Data {
-        return try Data.load(start: self.chunk_address, upTo: self.used, using: fileHandle)
+        return try Data.load(start: chunk_address, upTo: used, using: fileHandle)
     }
     func getChunksForData(using fileHandle: FileHandle) throws -> Allocator.Chunks {
         var chunks = Allocator.Chunks()
@@ -78,7 +78,7 @@ extension Data {
             var remaining = buffer.count
             while updateAddress != Int.max && remaining > 0 {
                 try n.load(using: fileHandle, from: updateAddress)
-                guard n.used != 0 else { throw LAErrors.InvalidAllocatedSize }
+//                guard n.used != 0 else { throw LAErrors.InvalidAllocatedSize }
                 var useCount = Swift.min(remaining, n.reserved - overhead)
                 remaining -= useCount
                 if remaining == 0 {
@@ -93,6 +93,16 @@ extension Data {
                 bufPosition += n.used
                 updateAddress = n.chunk_address
             }
+        }
+    }
+    func store(chunk: Allocator.Chunk, using fileHandle: FileHandle) throws {
+        guard ((self.count + MemoryLayout<LANode>.size) <= chunk.count) else { throw LAErrors.InvalidAllocatedSize }
+        try self.withUnsafeBytes { buffer in
+            try LANode(chunk_address: Address.invalid, //chunk.address,
+                       used: -self.count, reserved: chunk.count)
+                .store(using: fileHandle, at: chunk.address)
+            // This is a nasty case from const to mutable. It is done only to avoid copying data when saving to file.
+            try buffer.baseAddress!.store(fromOffset: 0, byteCount: self.count, using: fileHandle)
         }
     }
     func store(with chunks: Allocator.Chunks, using fileHandle: FileHandle) throws {
@@ -129,7 +139,6 @@ extension Data {
     }
     static func load(start address: Address, upTo byteCount: Int, using fileHandle: FileHandle) throws -> Data {
         guard byteCount > 0 else { return Data() }
-//        var data = Data(repeating: 0, count: byteCount)
         var data = Data(capacity: byteCount)
         var n = LANode()
         var loadAddress = address
@@ -153,7 +162,6 @@ extension Data {
         return data
     }
     static func load(start address: Address, using fileHandle: FileHandle) throws -> Data {
-        //        var data = Data(repeating: 0, count: byteCount)
         var data = Data()
         var n = LANode()
         var loadAddress = address

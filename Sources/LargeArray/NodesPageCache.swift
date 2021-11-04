@@ -42,6 +42,7 @@ class NodesPageCache {
     var heap: PageHeapUsage = PageHeapUsage(<)
     var maxHeap: Int
     var _cacheCounter: Int = 0
+    var _cacheMiss: Int = 0
     ///
     init(_ fileHandle: FileHandle, heapSize: Int = 8*1024) {
         self.fileHandle = fileHandle
@@ -50,6 +51,10 @@ class NodesPageCache {
             heap.push(Cache(Address.invalid, Nodes()))
         }
         
+    }
+    ///
+    deinit {
+//        print("-- Cache misses: ", _cacheMiss)
     }
     /// Store all dirty pages to storage.
     public func flush() {
@@ -97,7 +102,7 @@ class NodesPageCache {
     }
     ///
     func getOldestCache() -> Cache {
-        heap.heapifySiftDown()
+//        heap.heapifySiftDown()
         guard let c = heap.top else { fatalError("Unable to allocate Cache") }
         return c
     }
@@ -105,6 +110,7 @@ class NodesPageCache {
     func updateCache(_ pageInfo: PageInfo, block: (inout Cache)->Void) {
         cacheCounter += 1
         guard nil == pages[pageInfo.address] else { block(&(pages[pageInfo.address]!)); return}
+        _cacheMiss += 1
         guard let nd = try? Data.load(start: pageInfo.address,
                                       upTo: MemoryLayout<LANode>.size * pageInfo.count, using: fileHandle) else { fatalError("Failed to load cache for nodes. address:\(pageInfo.address), itemsCount: \(pageInfo.count)") }
         var cache = getOldestCache()
@@ -118,6 +124,7 @@ class NodesPageCache {
         cache.address = pageInfo.address // page info is updated
         pages[pageInfo.address] = cache // the updated cache is added back in
         block(&cache)
+        heap.siftDown()
     }
     func node(pageInfo: PageInfo, at position: Int) -> LANode {
         var n = LANode()

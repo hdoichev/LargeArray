@@ -162,11 +162,18 @@ public class LargeArray /*: MutableCollection, RandomAccessCollection */{
     func createNode(with data: Data) throws -> LANode {
         // Store the data and create a node to point to it.
         let overhead = MemoryLayout<LANode>.size
+//        guard let allocated = _storage.allocator.allocate(contiguous: data.count + overhead) else {
+//            throw LAErrors.AllocationFailed
+//        }
+//        let node = LANode(chunk_address: allocated.address, used: data.count, reserved: data.count)
+//        try data.store(chunk: allocated, using: _storage.fileHandle)
+
         guard let allocated = _storage.allocator.allocate(data.count, overhead: overhead) else {
             throw LAErrors.AllocationFailed
         }
         let node = LANode(chunk_address: allocated[0].address, used: data.count, reserved: data.count)
         try data.store(with: allocated, using: _storage.fileHandle)
+
         _dirty = true
         return node
     }

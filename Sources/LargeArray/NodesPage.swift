@@ -47,11 +47,13 @@ class NodesPage: Codable {
     ///
     init(maxNodes: LargeArray.Index, using storage: StorageSystem) throws {
         _storage = storage
-        guard let chunks = _storage!.allocator.allocate(maxNodes * MemoryLayout<LANode>.size, overhead: MemoryLayout<LANode>.size) else { throw LAErrors.AllocationFailed }
-        _info = PageInfo(address: chunks[0].address, count: 0, maxCount: maxNodes)
-        
-        let d = Data(repeating: 0, count: maxNodes * MemoryLayout<LANode>.size)
-        try d.store(with: chunks, using: _storage!.fileHandle)
+//        guard let chunks = _storage!.allocator.allocate(maxNodes * MemoryLayout<LANode>.size, overhead: MemoryLayout<LANode>.size) else { throw LAErrors.AllocationFailed }
+//        _info = PageInfo(address: chunks[0].address, count: 0, maxCount: maxNodes)
+//        let d = Data(repeating: 0, count: maxNodes * MemoryLayout<LANode>.size)
+//        try d.store(with: chunks, using: _storage!.fileHandle)
+        guard let chunk = _storage!.allocator.allocate(contiguous: (maxNodes * MemoryLayout<LANode>.size) + MemoryLayout<LANode>.size) else { throw LAErrors.AllocationFailed }
+        _info = PageInfo(address: chunk.address, count: 0, maxCount: maxNodes)
+        try Data().store(chunk: chunk, using: _storage!.fileHandle)
     }
     /// Deallocate the page and remove it from the prev/next chain,
     /// by linking the prev and next to one another
@@ -154,15 +156,14 @@ extension Address {
 
 @available(macOS 10.15.4, *)
 extension Nodes {
-    mutating func store(to info: PageInfo, with chunks: Allocator.Chunks, using fileHandle: FileHandle) throws {
+    mutating func update(to address: Address, using fileHandle: FileHandle) throws {
+        guard self.count > 0 else { fatalError("Updating with empty Nodes array") }
         try self.withUnsafeMutableBytes { buffer in
             try Data(bytesNoCopy: buffer.baseAddress!, count: buffer.count, deallocator: .none)
-                .store(with: chunks, using: fileHandle)
+                .update(startNodeAddress: address, using: fileHandle)
         }
-    }
-    func update(to address: Address, using fileHandle: FileHandle) throws {
-        var nodesData = Data(repeating: 0, count: MemoryLayout<LANode>.size * Int(self.count))
-        nodesData.withUnsafeMutableBytes { dest in self.withUnsafeBytes { source in dest.copyBytes(from: source) }}
-        try nodesData.update(startNodeAddress: address, using: fileHandle) // TODO: What about error handling???
+//        var nodesData = Data(repeating: 0, count: MemoryLayout<LANode>.size * Int(self.count))
+//        nodesData.withUnsafeMutableBytes { dest in self.withUnsafeBytes { source in dest.copyBytes(from: source) }}
+//        try nodesData.update(startNodeAddress: address, using: fileHandle) // TODO: What about error handling???
     }
 }
