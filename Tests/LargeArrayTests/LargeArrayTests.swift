@@ -4,8 +4,8 @@ import Compression
 
 @available(macOS 10.15.4, *)
 final class LargeArrayTests: XCTestCase {
-    let file_path = "/Users/hristo/junk/Test.LargeArray"
-    let file_path2 = "/Users/hristo/junk/Test2.LargeArray"
+    let file_path = "/Users/hristo/test/LargeArray/Test.LargeArray"
+    let file_path2 = "/Users/hristo/test/LargeArray/Test2.LargeArray"
     let elements_count = 10
     ///
     override func setUp() {

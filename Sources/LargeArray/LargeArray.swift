@@ -32,20 +32,6 @@ extension StorageSystem: StorableAllocator {
 }
 
 ///
-///  LargeArray structure:
-///   Header:
-///   NodesPage:
-///     Info:
-///     nodes: ContiguousArray<LANode>
-///     --- The Nodes are stored immediately after the NodesPage.Info information ---
-///
-///    ... the rest is a mixture of Objects data (which is pointed to by the Nodes) and additional IndexPages
-///
-///  LANode:
-///     address: Address
-///     used: Int
-///     reserved: Int
-///
 ///
 @available(macOS 10.15.4, *)
 public class LargeArray /*: MutableCollection, RandomAccessCollection */{
