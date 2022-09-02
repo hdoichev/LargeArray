@@ -85,8 +85,7 @@ final class LargeArrayTests: XCTestCase {
         let d = Data(repeating: 0xfa, count: Int.random(in: 1500..<1501))
         measure {
             do {
-                for i in 0..<numElements {
-//                    try la.append(Data(repeating: UInt8(i % 128), count: Int.random(in: 1500..<1501)))
+                for _ in 0..<numElements {
                     try la.append(d)
                 }
             } catch {
