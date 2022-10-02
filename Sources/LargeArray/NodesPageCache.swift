@@ -12,7 +12,12 @@ import Heap
 /// Reduce allocations of NodesCache pages and keep the number of memory under control.
 @available(macOS 10.15.4, *)
 class NodesPageCache {
-    class Cache: Comparable {
+    class Cache: Comparable, IndexAssignable {
+        var assignedIndex: Int {
+            get { return _assignedIndex }
+            set { _assignedIndex = newValue }
+        }
+        
         // MARK: Heap compare
         static func < (lhs: NodesPageCache.Cache, rhs: NodesPageCache.Cache) -> Bool {
             return lhs._cacheAge < rhs._cacheAge
@@ -23,6 +28,7 @@ class NodesPageCache {
         }
         
         var _cacheAge: Int = 0
+        var _assignedIndex: Int = -1
         var address: Address
         var nodes: Nodes = Nodes()
         var changes: Int = 0
@@ -35,7 +41,7 @@ class NodesPageCache {
     }
     //
     typealias PagesCache = [Address:Cache]
-    typealias PageHeapUsage = Heap<Cache> // keep track of which pages can be discarded
+    typealias PageHeapUsage = DHeap<Cache> // keep track of which pages can be discarded
     
     var fileHandle: FileHandle
     var pages: PagesCache = PagesCache()
@@ -50,7 +56,6 @@ class NodesPageCache {
         for _ in 0..<self.maxHeap {
             heap.push(Cache(Address.invalid, Nodes()))
         }
-        
     }
     ///
     deinit {
@@ -109,7 +114,18 @@ class NodesPageCache {
     ///
     func updateCache(_ pageInfo: PageInfo, block: (inout Cache)->Void) {
         cacheCounter += 1
-        guard nil == pages[pageInfo.address] else { block(&(pages[pageInfo.address]!)); return}
+        let page = pages[pageInfo.address]
+        guard nil == page else {
+            guard var page = page else { return }
+            block(&page)
+            /// Have to update the cache age in the Heap.
+            heap.update(at: page.assignedIndex) {
+                $0._cacheAge = cacheCounter
+            }
+            return
+        }
+        // We dont have this page in the cache.
+        // Get the oldest used page, persist it and then use it to store data for the new address.
         _cacheMiss += 1
         guard let nd = try? Data.load(start: pageInfo.address,
                                       upTo: MemoryLayout<LANode>.size * pageInfo.count, using: fileHandle) else { fatalError("Failed to load cache for nodes. address:\(pageInfo.address), itemsCount: \(pageInfo.count)") }
@@ -122,6 +138,7 @@ class NodesPageCache {
         for _ in 0..<pageInfo.count { cache.nodes.append(LANode()) }
         _ = cache.nodes.withUnsafeMutableBufferPointer { nd.copyBytes(to: $0) } // nodes page is updated
         cache.address = pageInfo.address // page info is updated
+        cache._cacheAge = _cacheCounter
         pages[pageInfo.address] = cache // the updated cache is added back in
         block(&cache)
         heap.siftDown()

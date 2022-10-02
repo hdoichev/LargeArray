@@ -129,7 +129,7 @@ final class LargeArrayTests: XCTestCase {
             for i in 1024..<2048 { la[i] = Data(repeating: 2, count: 100) }
             print(la)
             la[1024].forEach { XCTAssertEqual($0, 2) }
-            // remove all elements from the second pate
+            // remove all elements from the second page
             XCTAssertNoThrow(try la.removeSubrange(1024..<2048))
             la[1024].forEach { XCTAssertEqual($0, 1) }
             la[0].forEach { XCTAssertEqual($0, 1) }
