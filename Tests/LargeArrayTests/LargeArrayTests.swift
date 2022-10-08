@@ -107,13 +107,14 @@ final class LargeArrayTests: XCTestCase {
             }
             print(la)
             measure {
-                for n in la {
-                    XCTAssertTrue((1000..<1501).contains(n.count))
-                    if (1000..<1501).contains(n.count) == false {
-                        print("ERROR")
-                        break
+                for _ in 0..<5 {
+                    for i in 0..<32 {
+                        for idx in stride(from: i, to: numElements, by: 32) {
+                            XCTAssertTrue((1000..<1501).contains(la[idx].count))
+                        }
                     }
                 }
+//                print(la._storage.pageCache.cacheCounter, la._storage.pageCache._cacheMiss)
             }
         } catch {}
     }

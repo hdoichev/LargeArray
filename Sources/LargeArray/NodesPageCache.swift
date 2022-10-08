@@ -82,9 +82,7 @@ class NodesPageCache {
             c.changes = 0
             c.address = Address.invalid
             // Bring the new page to the top of the heap.
-            // Not required to heapify right now, since
-            // getOldestCache will do the same
-//            heap.heapifySiftDown()
+            heap.heapifySiftDown()
         }
     }
     var cacheCounter: Int {
@@ -107,7 +105,6 @@ class NodesPageCache {
     }
     ///
     func getOldestCache() -> Cache {
-//        heap.heapifySiftDown()
         guard let c = heap.top else { fatalError("Unable to allocate Cache") }
         return c
     }
